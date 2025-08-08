@@ -34,7 +34,7 @@ export default function LandingPage() {
   }
 
   const startQuiz = (quiz: Quiz) => {
-    router.push(`/quiz?id=${quiz.id}`)
+    router.push('/quiz')
   }
 
   if (loading) {
