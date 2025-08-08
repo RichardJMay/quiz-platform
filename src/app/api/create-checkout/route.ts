@@ -4,6 +4,14 @@ import { supabase } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   try {
+    // Check if Stripe is configured
+    if (!stripe) {
+      return NextResponse.json(
+        { error: 'Payment system not configured' },
+        { status: 500 }
+      )
+    }
+
     const { quizId, userEmail } = await request.json()
 
     // Validate input
