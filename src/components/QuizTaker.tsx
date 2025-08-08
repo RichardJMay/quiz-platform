@@ -244,203 +244,159 @@ export default function QuizTaker() {
     const progress = ((currentQuestionIndex + 1) / questions.length) * 100
     const currentRate = getCurrentFluencyRate()
     
-    // Thermometer calculations
+    // Fluency bar calculations
     const threshold = 30
-    const maxThermometerRate = 60 // Show up to 60 correct/min on thermometer
-    const thermometerPercentage = Math.min(100, (currentRate / maxThermometerRate) * 100)
-    const thresholdPercentage = (threshold / maxThermometerRate) * 100
+    const maxBarRate = 60 // Show up to 60 correct/min on bar
+    const barPercentage = Math.min(100, (currentRate / maxBarRate) * 100)
+    const thresholdPercentage = (threshold / maxBarRate) * 100
     const isAboveThreshold = currentRate >= threshold
-    const distanceFromThreshold = Math.abs(currentRate - threshold)
 
     return (
-      <div className="max-w-4xl mx-auto p-6">
-        {/* Progress bar */}
-        <div className="mb-6">
-          <div className="flex justify-between text-sm text-gray-600 mb-2">
-            <span>Question {currentQuestionIndex + 1} of {questions.length}</span>
-            <div className="flex gap-4">
-              <span>{score} correct so far</span>
-              {score > 0 && (
-                <span className={`font-medium ${
-                  currentRate >= 30 ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {currentRate.toFixed(1)} correct/min
-                </span>
+      <div className="flex max-w-6xl mx-auto p-6 gap-6">
+        {/* Main content area */}
+        <div className="flex-1">
+          {/* Progress bar */}
+          <div className="mb-6">
+            <div className="flex justify-between text-sm text-gray-600 mb-2">
+              <span>Question {currentQuestionIndex + 1} of {questions.length}</span>
+              <div className="flex gap-4">
+                <span>{score} correct so far</span>
+                {score > 0 && (
+                  <span className={`font-medium text-lg ${
+                    currentRate >= 30 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {currentRate.toFixed(1)} correct/min
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              ></div>
+            </div>
+          </div>
+
+          {/* Question */}
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold mb-6">{currentQuestion.question_text}</h2>
+
+            {/* Answer options */}
+            <div className="space-y-3 mb-6">
+              {currentQuestion.answer_options
+                .sort((a, b) => a.option_letter.localeCompare(b.option_letter))
+                .map((option) => (
+                <label
+                  key={option.option_letter}
+                  className={`block p-4 border rounded-lg cursor-pointer transition-colors ${
+                    selectedAnswer === option.option_letter
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                  } ${showFeedback ? 'cursor-not-allowed' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="answer"
+                    value={option.option_letter}
+                    checked={selectedAnswer === option.option_letter}
+                    onChange={(e) => setSelectedAnswer(e.target.value)}
+                    disabled={showFeedback}
+                    className="mr-3"
+                  />
+                  <span className="font-medium">{option.option_letter}.</span> {option.option_text}
+                </label>
+              ))}
+            </div>
+
+            {/* Feedback */}
+            {showFeedback && (
+              <div className={`p-4 rounded-lg mb-6 ${
+                selectedAnswer === currentQuestion.correct_answer
+                  ? 'bg-green-100 border border-green-300'
+                  : 'bg-red-100 border border-red-300'
+              }`}>
+                <div className="font-semibold mb-2">
+                  {selectedAnswer === currentQuestion.correct_answer ? '✅ Correct!' : '❌ Incorrect'}
+                </div>
+                <div className="text-sm">
+                  <strong>Correct Answer:</strong> {currentQuestion.correct_answer}
+                </div>
+                <div className="text-sm mt-2">
+                  <strong>Explanation:</strong> {currentQuestion.explanation}
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex justify-end">
+              {!showFeedback ? (
+                <button
+                  onClick={submitAnswer}
+                  disabled={!selectedAnswer}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  Submit Answer
+                </button>
+              ) : (
+                <button
+                  onClick={nextQuestion}
+                  className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
+                >
+                  {currentQuestionIndex < questions.length - 1 ? 'Next Question' : 'Finish Quiz'}
+                </button>
               )}
             </div>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div 
-              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            ></div>
-          </div>
         </div>
 
-        {/* Fluency Thermometer */}
+        {/* Fluency bar sidebar */}
         {score > 0 && (
-          <div className="mb-6 p-4 bg-white rounded-lg shadow-md">
-            <h3 className="text-lg font-semibold mb-3 text-center">Fluency Thermometer</h3>
-            <div className="flex items-center gap-4">
-              {/* Thermometer */}
-              <div className="relative">
-                {/* Thermometer bulb */}
-                <div className="w-8 h-8 bg-gray-300 rounded-full mx-auto mb-1 flex items-center justify-center">
-                  <div className={`w-6 h-6 rounded-full transition-colors duration-500 ${
-                    isAboveThreshold ? 'bg-green-500' : 'bg-red-500'
-                  }`}></div>
-                </div>
-                
-                {/* Thermometer tube */}
-                <div className="relative w-6 h-40 bg-gray-200 rounded-t-lg mx-auto border-2 border-gray-300">
-                  {/* Threshold line */}
-                  <div 
-                    className="absolute left-0 right-0 h-0.5 bg-gray-700 z-20"
-                    style={{ bottom: `${thresholdPercentage}%` }}
-                  ></div>
-                  <div 
-                    className="absolute -right-12 text-xs text-gray-700 font-medium"
-                    style={{ bottom: `${thresholdPercentage - 2}%` }}
-                  >
-                    {threshold}/min
-                  </div>
-                  
-                  {/* Mercury/fluid */}
-                  <div 
-                    className={`absolute bottom-0 left-0 right-0 rounded-t-lg transition-all duration-1000 ease-out ${
-                      isAboveThreshold ? 'bg-green-500' : 'bg-red-500'
-                    }`}
-                    style={{ height: `${thermometerPercentage}%` }}
-                  ></div>
-                  
-                  {/* Scale marks */}
-                  <div className="absolute -left-8 top-0 bottom-0 flex flex-col justify-between text-xs text-gray-600">
-                    <span>{maxThermometerRate}</span>
-                    <span>{maxThermometerRate * 0.75}</span>
-                    <span>{maxThermometerRate * 0.5}</span>
-                    <span>{maxThermometerRate * 0.25}</span>
-                    <span>0</span>
-                  </div>
-                </div>
+          <div className="w-32 flex flex-col items-center">
+            <h3 className="text-lg font-semibold mb-4 text-center">Fluency Target</h3>
+            
+            {/* Vertical bar */}
+            <div className="relative w-8 h-80 bg-gray-200 rounded-lg border-2 border-gray-300 mb-4">
+              {/* Scale markings */}
+              <div className="absolute -left-12 top-0 bottom-0 flex flex-col justify-between text-xs text-gray-600">
+                <span>60</span>
+                <span>45</span>
+                <span className="font-bold">30</span>
+                <span>15</span>
+                <span>0</span>
               </div>
               
-              {/* Status text */}
-              <div className="flex-1">
-                <div className={`text-2xl font-bold mb-2 ${
-                  isAboveThreshold ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {currentRate.toFixed(1)} correct/min
-                </div>
-                
-                <div className={`text-lg font-medium mb-2 ${
-                  isAboveThreshold ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {isAboveThreshold 
-                    ? `🔥 ${distanceFromThreshold.toFixed(1)} above target!` 
-                    : `❄️ ${distanceFromThreshold.toFixed(1)} below target`
-                  }
-                </div>
-                
-                <div className="text-sm text-gray-600">
-                  {isAboveThreshold 
-                    ? "Excellent fluency! Keep it up!" 
-                    : "Speed up to reach fluency target"
-                  }
-                </div>
-                
-                {/* Progress towards/beyond threshold */}
-                <div className="mt-3">
-                  <div className="text-xs text-gray-500 mb-1">
-                    {isAboveThreshold ? 'Performance above threshold' : 'Progress to threshold'}
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div 
-                      className={`h-2 rounded-full transition-all duration-1000 ${
-                        isAboveThreshold ? 'bg-green-500' : 'bg-red-500'
-                      }`}
-                      style={{ 
-                        width: isAboveThreshold 
-                          ? `${Math.min(100, (distanceFromThreshold / 30) * 100)}%`
-                          : `${(currentRate / threshold) * 100}%`
-                      }}
-                    ></div>
-                  </div>
-                </div>
+              {/* Threshold line */}
+              <div 
+                className="absolute left-0 right-0 h-1 bg-gray-700 z-20"
+                style={{ bottom: `${thresholdPercentage}%` }}
+              ></div>
+              <div 
+                className="absolute -right-8 text-xs text-gray-700 font-bold"
+                style={{ bottom: `${thresholdPercentage - 1}%` }}
+              >
+                TARGET
+              </div>
+              
+              {/* Performance bar */}
+              <div 
+                className={`absolute bottom-0 left-0 right-0 rounded-lg transition-all duration-1000 ease-out ${
+                  isAboveThreshold ? 'bg-green-500' : 'bg-red-500'
+                }`}
+                style={{ height: `${barPercentage}%` }}
+              ></div>
+            </div>
+            
+            {/* Current rate display */}
+            <div className="text-center">
+              <div className={`text-sm font-medium ${
+                isAboveThreshold ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {currentRate.toFixed(1)}/min
               </div>
             </div>
           </div>
         )}
-
-        {/* Question */}
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <h2 className="text-xl font-semibold mb-6">{currentQuestion.question_text}</h2>
-
-          {/* Answer options */}
-          <div className="space-y-3 mb-6">
-            {currentQuestion.answer_options
-              .sort((a, b) => a.option_letter.localeCompare(b.option_letter))
-              .map((option) => (
-              <label
-                key={option.option_letter}
-                className={`block p-4 border rounded-lg cursor-pointer transition-colors ${
-                  selectedAnswer === option.option_letter
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-300 hover:border-gray-400'
-                } ${showFeedback ? 'cursor-not-allowed' : ''}`}
-              >
-                <input
-                  type="radio"
-                  name="answer"
-                  value={option.option_letter}
-                  checked={selectedAnswer === option.option_letter}
-                  onChange={(e) => setSelectedAnswer(e.target.value)}
-                  disabled={showFeedback}
-                  className="mr-3"
-                />
-                <span className="font-medium">{option.option_letter}.</span> {option.option_text}
-              </label>
-            ))}
-          </div>
-
-          {/* Feedback */}
-          {showFeedback && (
-            <div className={`p-4 rounded-lg mb-6 ${
-              selectedAnswer === currentQuestion.correct_answer
-                ? 'bg-green-100 border border-green-300'
-                : 'bg-red-100 border border-red-300'
-            }`}>
-              <div className="font-semibold mb-2">
-                {selectedAnswer === currentQuestion.correct_answer ? '✅ Correct!' : '❌ Incorrect'}
-              </div>
-              <div className="text-sm">
-                <strong>Correct Answer:</strong> {currentQuestion.correct_answer}
-              </div>
-              <div className="text-sm mt-2">
-                <strong>Explanation:</strong> {currentQuestion.explanation}
-              </div>
-            </div>
-          )}
-
-          {/* Action buttons */}
-          <div className="flex justify-end">
-            {!showFeedback ? (
-              <button
-                onClick={submitAnswer}
-                disabled={!selectedAnswer}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                Submit Answer
-              </button>
-            ) : (
-              <button
-                onClick={nextQuestion}
-                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
-              >
-                {currentQuestionIndex < questions.length - 1 ? 'Next Question' : 'Finish Quiz'}
-              </button>
-            )}
-          </div>
-        </div>
       </div>
     )
   }
