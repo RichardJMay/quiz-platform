@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import ExcelUpload from '@/components/ExcelUpload'
 
@@ -63,18 +64,18 @@ export default function AdminPage() {
               Upload your Excel file with quiz questions and set pricing.
             </p>
             <div className="flex gap-4 justify-center">
-              <a
+              <Link
                 href="/"
                 className="inline-block bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
               >
                 View Public Site
-              </a>
-              <a
+              </Link>
+              <Link
                 href="/quiz"
                 className="inline-block bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-medium"
               >
                 Test Quiz Interface
-              </a>
+              </Link>
             </div>
           </div>
 
