@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 interface Quiz {
@@ -21,6 +22,9 @@ interface Question {
 }
 
 export default function QuizTaker() {
+  const searchParams = useSearchParams()
+  const quizId = searchParams.get('id')
+  
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [selectedQuiz, setSelectedQuiz] = useState<Quiz | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
@@ -33,10 +37,14 @@ export default function QuizTaker() {
   const [loading, setLoading] = useState(false)
   const [startTime, setStartTime] = useState<Date | null>(null)
 
-  // Load available quizzes
+  // Load available quizzes or specific quiz
   useEffect(() => {
-    loadQuizzes()
-  }, [])
+    if (quizId) {
+      loadSpecificQuiz(quizId)
+    } else {
+      loadQuizzes()
+    }
+  }, [quizId])
 
   const loadQuizzes = async () => {
     const { data, error } = await supabase
@@ -48,6 +56,21 @@ export default function QuizTaker() {
       console.error('Error loading quizzes:', error)
     } else {
       setQuizzes(data || [])
+    }
+  }
+
+  const loadSpecificQuiz = async (id: string) => {
+    const { data, error } = await supabase
+      .from('quizzes')
+      .select('id, title, description')
+      .eq('id', id)
+      .single()
+
+    if (error) {
+      console.error('Error loading specific quiz:', error)
+      loadQuizzes() // Fallback to showing all quizzes
+    } else {
+      setSelectedQuiz(data)
     }
   }
 
@@ -238,6 +261,37 @@ export default function QuizTaker() {
     )
   }
 
+  // If a specific quiz was selected from landing page, show name input and start button
+  if (selectedQuiz && !questions.length) {
+    return (
+      <div className="max-w-2xl mx-auto p-6">
+        <div className="bg-white rounded-lg shadow-lg p-8">
+          <h1 className="text-3xl font-bold text-center mb-2">{selectedQuiz.title}</h1>
+          <p className="text-gray-600 text-center mb-8">{selectedQuiz.description}</p>
+          
+          {/* Student name input */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium mb-2">Your Name:</label>
+            <input
+              type="text"
+              value={studentName}
+              onChange={(e) => setStudentName(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter your name..."
+            />
+          </div>
+
+          <button
+            onClick={() => startQuiz(selectedQuiz)}
+            className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          >
+            Start Quiz
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // Quiz taking interface
   if (selectedQuiz && questions.length > 0) {
     const currentQuestion = questions[currentQuestionIndex]
@@ -401,7 +455,7 @@ export default function QuizTaker() {
     )
   }
 
-  // Quiz selection screen
+  // Quiz selection screen (fallback if no specific quiz selected)
   return (
     <div className="max-w-2xl mx-auto p-6">
       <h1 className="text-3xl font-bold text-center mb-8">Select a Quiz</h1>
