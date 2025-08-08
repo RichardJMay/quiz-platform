@@ -29,18 +29,18 @@ export default function ExcelUpload() {
           const workbook = XLSX.read(data, { type: 'array' })
           const sheetName = workbook.SheetNames[0]
           const worksheet = workbook.Sheets[sheetName]
-          const jsonData = XLSX.utils.sheet_to_json(worksheet)
+          const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[]
 
           console.log('Raw Excel data:', jsonData)
 
-          const quizData: QuizData[] = jsonData.map((row: any) => ({
-            question: row.Question || row.question || '',
-            optionA: row['Option A'] || row.optionA || row.A || '',
-            optionB: row['Option B'] || row.optionB || row.B || '',
-            optionC: row['Option C'] || row.optionC || row.C || '',
-            optionD: row['Option D'] || row.optionD || row.D || '',
-            correctAnswer: row['Correct Answer'] || row.correctAnswer || row.Answer || '',
-            explanation: row.Explanation || row.explanation || ''
+          const quizData: QuizData[] = jsonData.map((row) => ({
+            question: (row.Question || row.question || '') as string,
+            optionA: (row['Option A'] || row.optionA || row.A || '') as string,
+            optionB: (row['Option B'] || row.optionB || row.B || '') as string,
+            optionC: (row['Option C'] || row.optionC || row.C || '') as string,
+            optionD: (row['Option D'] || row.optionD || row.D || '') as string,
+            correctAnswer: (row['Correct Answer'] || row.correctAnswer || row.Answer || '') as string,
+            explanation: (row.Explanation || row.explanation || '') as string
           }))
 
           resolve(quizData)
@@ -140,10 +140,10 @@ export default function ExcelUpload() {
       
       if (error && typeof error === 'object') {
         console.error('Error keys:', Object.keys(error))
-        console.error('Error message:', (error as any).message)
-        console.error('Error details:', (error as any).details)
-        console.error('Error hint:', (error as any).hint)
-        console.error('Error code:', (error as any).code)
+        console.error('Error message:', (error as Record<string, unknown>).message)
+        console.error('Error details:', (error as Record<string, unknown>).details)
+        console.error('Error hint:', (error as Record<string, unknown>).hint)
+        console.error('Error code:', (error as Record<string, unknown>).code)
       }
       
       setMessage(`❌ Error: ${error instanceof Error ? error.message : JSON.stringify(error) || 'Upload failed'}`)
