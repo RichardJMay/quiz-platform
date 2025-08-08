@@ -5,11 +5,14 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import PaymentButton from '@/components/payment/PaymentButton'
 
 interface Quiz {
   id: string
   title: string
   description: string
+  price: number
+  is_free: boolean
 }
 
 export default function LandingPage() {
@@ -24,7 +27,7 @@ export default function LandingPage() {
   const loadQuizzes = async () => {
     const { data, error } = await supabase
       .from('quizzes')
-      .select('id, title, description')
+      .select('id, title, description, price, is_free')
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -35,7 +38,7 @@ export default function LandingPage() {
     setLoading(false)
   }
 
-  const startQuiz = (quiz: Quiz) => {
+  const startFreeQuiz = (quiz: Quiz) => {
     router.push(`/quiz?id=${quiz.id}`)
   }
 
@@ -76,14 +79,33 @@ export default function LandingPage() {
               <div key={quiz.id} className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow">
                 <div className="p-8">
                   <h3 className="text-xl font-bold mb-3 text-gray-900">{quiz.title}</h3>
-                  <p className="text-gray-600 mb-6">{quiz.description}</p>
+                  <p className="text-gray-600 mb-4">{quiz.description}</p>
                   
-                  <button
-                    onClick={() => startQuiz(quiz)}
-                    className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                  >
-                    Start Quiz
-                  </button>
+                  {/* Price display for paid quizzes */}
+                  {!quiz.is_free && (
+                    <div className="mb-4">
+                      <span className="inline-block bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full">
+                        ${quiz.price}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {/* Conditional button rendering */}
+                  {quiz.is_free ? (
+                    <button
+                      onClick={() => startFreeQuiz(quiz)}
+                      className="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700 transition-colors"
+                    >
+                      Start Free Quiz
+                    </button>
+                  ) : (
+                    <PaymentButton
+                      quizId={quiz.id}
+                      price={quiz.price}
+                      title={quiz.title}
+                      className="w-full"
+                    />
+                  )}
                 </div>
               </div>
             ))}
