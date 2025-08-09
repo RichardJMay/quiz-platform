@@ -7,6 +7,9 @@ import Link from 'next/link'
 function QuizAccessContent() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [quizTitle, setQuizTitle] = useState('')
+  const [quizId, setQuizId] = useState('')
+  const [userEmail, setUserEmail] = useState('')
+  const [amountPaid, setAmountPaid] = useState(0)
   const [sessionId, setSessionId] = useState('')
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -25,14 +28,21 @@ function QuizAccessContent() {
 
   const verifyPayment = async (sessionId: string) => {
     try {
-      // For now, we'll simulate success and extract quiz info from the session
-      // Later we can add proper payment verification via webhook
+      const response = await fetch(`/api/verify-payment?session_id=${sessionId}`)
       
-      // Temporary success - we'll improve this with proper verification
-      setQuizTitle('Your Purchased Quiz')
+      if (!response.ok) {
+        throw new Error('Payment verification failed')
+      }
+
+      const data = await response.json()
+      
+      setQuizTitle(data.quizTitle || 'Your Quiz')
+      setQuizId(data.quizId)
+      setUserEmail(data.userEmail)
+      setAmountPaid(data.amountPaid)
       setStatus('success')
       
-      console.log('Payment successful for session:', sessionId)
+      console.log('Payment verified successfully:', data)
     } catch (error) {
       console.error('Payment verification error:', error)
       setStatus('error')
@@ -40,9 +50,13 @@ function QuizAccessContent() {
   }
 
   const handleStartQuiz = () => {
-    // For now, redirect to main quiz page
-    // Later we'll create secure quiz access with the session ID
-    router.push('/quiz')
+    if (quizId) {
+      // Redirect directly to the purchased quiz
+      router.push(`/quiz?id=${quizId}`)
+    } else {
+      // Fallback to general quiz page
+      router.push('/quiz')
+    }
   }
 
   if (status === 'loading') {
@@ -92,6 +106,9 @@ function QuizAccessContent() {
         </p>
         <div className="bg-white rounded-lg p-4 mb-6 border border-green-200">
           <h2 className="font-semibold text-lg text-gray-800">{quizTitle}</h2>
+          {amountPaid > 0 && (
+            <p className="text-sm text-gray-600 mt-1">Amount paid: ${amountPaid}</p>
+          )}
         </div>
         
         <div className="space-y-3">
