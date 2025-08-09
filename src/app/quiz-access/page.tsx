@@ -1,13 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 
-export default function QuizAccessPage() {
+function QuizAccessContent() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [quizTitle, setQuizTitle] = useState('')
-  const [quizId, setQuizId] = useState('')
   const [sessionId, setSessionId] = useState('')
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -31,7 +30,6 @@ export default function QuizAccessPage() {
       
       // Temporary success - we'll improve this with proper verification
       setQuizTitle('Your Purchased Quiz')
-      setQuizId('quiz-id-placeholder')
       setStatus('success')
       
       console.log('Payment successful for session:', sessionId)
@@ -119,5 +117,24 @@ export default function QuizAccessPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-blue-50">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <div className="text-xl text-gray-700">Loading...</div>
+      </div>
+    </div>
+  )
+}
+
+export default function QuizAccessPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <QuizAccessContent />
+    </Suspense>
   )
 }
