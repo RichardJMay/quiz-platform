@@ -1,13 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 
 interface Quiz {
   id: string
   title: string
   description: string
+  is_free: boolean
+  price: number
 }
 
 interface Question {
@@ -23,7 +26,9 @@ interface Question {
 
 export default function QuizTaker() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const quizId = searchParams.get('id')
+  const { user } = useAuth()
   
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [selectedQuiz, setSelectedQuiz] = useState<Quiz | null>(null)
@@ -36,6 +41,8 @@ export default function QuizTaker() {
   const [quizCompleted, setQuizCompleted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [startTime, setStartTime] = useState<Date | null>(null)
+  const [accessError, setAccessError] = useState<string | null>(null)
+  const [checkingAccess, setCheckingAccess] = useState(false)
 
   // Load available quizzes or specific quiz
   useEffect(() => {
@@ -44,41 +51,155 @@ export default function QuizTaker() {
     } else {
       loadQuizzes()
     }
-  }, [quizId])
+  }, [quizId, user]) // Add user dependency to recheck access when auth changes
 
   const loadQuizzes = async () => {
     const { data, error } = await supabase
       .from('quizzes')
-      .select('id, title, description')
+      .select('id, title, description, is_free, price')
       .order('created_at', { ascending: false })
 
     if (error) {
       console.error('Error loading quizzes:', error)
     } else {
-      setQuizzes(data || [])
+      // Filter to only show free quizzes in the quiz taker
+      const freeQuizzes = (data || []).filter(quiz => quiz.is_free)
+      setQuizzes(freeQuizzes)
     }
   }
 
   const loadSpecificQuiz = async (id: string) => {
-    const { data, error } = await supabase
-      .from('quizzes')
-      .select('id, title, description')
-      .eq('id', id)
-      .single()
+    setCheckingAccess(true)
+    setAccessError(null)
 
-    if (error) {
-      console.error('Error loading specific quiz:', error)
-      loadQuizzes() // Fallback to showing all quizzes
-    } else {
-      setSelectedQuiz(data)
+    try {
+      // First, get the quiz details
+      const { data: quiz, error: quizError } = await supabase
+        .from('quizzes')
+        .select('id, title, description, is_free, price')
+        .eq('id', id)
+        .single()
+
+      if (quizError || !quiz) {
+        console.error('Error loading specific quiz:', quizError)
+        setAccessError('Quiz not found.')
+        setCheckingAccess(false)
+        return
+      }
+
+      // If quiz is free, allow access
+      if (quiz.is_free) {
+        setSelectedQuiz(quiz)
+        setCheckingAccess(false)
+        return
+      }
+
+      // For paid quizzes, check if user has access
+      const hasAccess = await checkQuizAccess(id)
+      
+      if (hasAccess) {
+        setSelectedQuiz(quiz)
+      } else {
+        setAccessError(
+          user 
+            ? 'You need to purchase this quiz to access it. Please return to the main page to purchase.'
+            : 'This is a paid quiz. Please return to the main page to purchase access.'
+        )
+      }
+    } catch (error) {
+      console.error('Error checking quiz access:', error)
+      setAccessError('Error checking quiz access. Please try again.')
+    } finally {
+      setCheckingAccess(false)
     }
   }
 
-  const startQuiz = async (quiz: Quiz) => {
-    if (!studentName.trim()) {
-      alert('Please enter your name first')
-      return
+  const checkQuizAccess = async (quizId: string): Promise<boolean> => {
+    console.log('Checking quiz access for:', { userId: user?.id, userEmail: user?.email, quizId })
+    
+    // Check for authenticated user purchase
+    if (user) {
+      const { data: userPurchase, error: userError } = await supabase
+        .from('purchases')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('quiz_id', quizId)
+        .eq('status', 'completed')
+        .single()
+
+      console.log('User purchase check:', { userPurchase, userError })
+
+      if (userPurchase) {
+        console.log('User has purchased this quiz via user_id')
+        return true
+      }
+
+      // Also check email-based purchases that might not be linked yet
+      const { data: emailPurchase, error: emailError } = await supabase
+        .from('purchases')
+        .select('id')
+        .eq('user_email', user.email)
+        .eq('quiz_id', quizId)
+        .eq('status', 'completed')
+        .single()
+
+      console.log('Email purchase check:', { emailPurchase, emailError })
+
+      if (emailPurchase) {
+        console.log('User has email-based purchase for this quiz')
+        return true
+      }
     }
+
+    // Check for session-based access (from payment success) - but ignore old sessions
+    const sessionId = searchParams.get('session_id')
+    if (sessionId) {
+      console.log('Checking session access for:', sessionId)
+      
+      try {
+        const response = await fetch('/api/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log('Session verification result:', data)
+          if (data.quizId === quizId) {
+            console.log('Session provides access to this quiz')
+            return true
+          }
+        }
+      } catch (error) {
+        console.error('Error verifying payment session:', error)
+      }
+    }
+
+    // Check for token-based access (legacy)
+    const token = searchParams.get('token')
+    if (token) {
+      const { data: tokenAccess } = await supabase
+        .from('quiz_access_tokens')
+        .select('quiz_id, expires_at')
+        .eq('token', token)
+        .eq('quiz_id', quizId)
+        .single()
+
+      if (tokenAccess && new Date(tokenAccess.expires_at) > new Date()) {
+        console.log('Valid token provides access')
+        return true
+      }
+    }
+
+    console.log('No valid access found for quiz')
+    return false
+  }
+
+  const startQuiz = async (quiz: Quiz) => {
+    // Auto-generate student name from user info or use default
+    const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student'
+    setStudentName(displayName)
 
     setLoading(true)
     setSelectedQuiz(quiz)
@@ -148,7 +269,45 @@ export default function QuizTaker() {
       setSelectedAnswer('')
       setShowFeedback(false)
     } else {
+      // Quiz completed - save attempt and show results
+      saveQuizAttempt()
       setQuizCompleted(true)
+    }
+  }
+
+  // Save completed quiz attempt to database
+  const saveQuizAttempt = async () => {
+    if (!selectedQuiz || !startTime) return
+
+    const endTime = new Date()
+    const totalTimeMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60)
+    const accuracyPercentage = Math.round((score / questions.length) * 100)
+    const fluencyRate = totalTimeMinutes > 0 ? score / totalTimeMinutes : 0
+
+    const attemptData = {
+      user_email: user?.email || 'anonymous',
+      quiz_id: selectedQuiz.id,
+      student_name: studentName,
+      total_questions: questions.length,
+      correct_answers: score,
+      accuracy_percentage: accuracyPercentage,
+      fluency_rate: fluencyRate,
+      total_time_minutes: totalTimeMinutes,
+      ...(user && { user_id: user.id })
+    }
+
+    try {
+      const { error } = await supabase
+        .from('quiz_attempts')
+        .insert([attemptData])
+
+      if (error) {
+        console.error('Error saving quiz attempt:', error)
+      } else {
+        console.log('Quiz attempt saved successfully')
+      }
+    } catch (error) {
+      console.error('Error in saveQuizAttempt:', error)
     }
   }
 
@@ -162,6 +321,7 @@ export default function QuizTaker() {
     setQuizCompleted(false)
     setStudentName('')
     setStartTime(null)
+    setAccessError(null)
   }
 
   // Helper function to get current fluency rate
@@ -172,10 +332,32 @@ export default function QuizTaker() {
     return score / elapsedMinutes
   }
 
-  if (loading) {
+  // Show access error
+  if (accessError) {
+    return (
+      <div className="max-w-2xl mx-auto p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-8 text-center">
+          <div className="text-6xl mb-4">🔒</div>
+          <h2 className="text-2xl font-bold text-red-800 mb-4">Access Required</h2>
+          <p className="text-red-700 mb-6">{accessError}</p>
+          <button
+            onClick={() => window.location.href = '/'}
+            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Return to Main Page
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Show loading while checking access
+  if (checkingAccess || loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-xl">Loading quiz...</div>
+        <div className="text-xl">
+          {checkingAccess ? 'Checking quiz access...' : 'Loading quiz...'}
+        </div>
       </div>
     )
   }
@@ -197,89 +379,127 @@ export default function QuizTaker() {
     const barPercentage = Math.min(100, (rateScore / maxBarWidth) * 100)
     
     return (
-      <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-lg text-center">
-        <h2 className="text-3xl font-bold mb-4">Quiz Completed! 🎉</h2>
-        
-        {/* Accuracy Score */}
-        <div className="mb-6">
-          <div className="text-6xl mb-2">{percentage}%</div>
-          <div className="text-xl mb-2">
-            You scored {score} out of {questions.length} questions correctly
-          </div>
-          <div className="text-sm text-gray-600">
-            Total time: {totalQuizTimeMinutes.toFixed(1)} minutes
-          </div>
-        </div>
-        
-        {/* Rate Score */}
-        <div className="mb-6 p-4 border rounded-lg">
-          <h3 className="text-xl font-semibold mb-3">Fluency Score</h3>
-          <div className={`text-3xl font-bold mb-2 ${isAboveThreshold ? 'text-green-600' : 'text-red-600'}`}>
-            {correctResponsesPerMinute.toFixed(1)} correct/min
-          </div>
-          <div className="text-sm text-gray-600 mb-3">
-            Threshold: {threshold} correct/min
-          </div>
-          
-          {/* Rate Bar */}
-          <div className="relative w-full h-8 bg-gray-200 rounded-lg overflow-hidden">
-            {/* Threshold line */}
-            <div className="absolute left-0 top-0 w-px h-full bg-gray-400 z-10"></div>
-            <div className="absolute left-0 -top-6 text-xs text-gray-600">0</div>
+      <div className="min-h-screen bg-gray-100 py-8">
+        <div className="max-w-4xl mx-auto p-4 sm:p-6">
+          <div className="bg-white rounded-lg shadow-lg text-center p-6 sm:p-8">
+            <h2 className="text-2xl sm:text-3xl font-bold mb-6 text-gray-900">Quiz Completed! 🎉</h2>
             
-            {/* Performance bar */}
-            {isAboveThreshold ? (
-              <div 
-                className="h-full bg-green-500 transition-all duration-1000 ease-out"
-                style={{ width: `${barPercentage}%` }}
-              ></div>
-            ) : (
-              <div className="h-full bg-red-500 opacity-50"></div>
-            )}
-            
-            {/* Rate indicator */}
-            <div className="absolute inset-0 flex items-center justify-center text-white font-semibold text-sm">
-              {isAboveThreshold 
-                ? `+${rateScore.toFixed(1)} above threshold!` 
-                : `${(threshold - correctResponsesPerMinute).toFixed(1)} below threshold`
-              }
+            {/* Results Summary */}
+            <div className="grid md:grid-cols-3 gap-6 mb-8">
+              {/* Accuracy Score */}
+              <div className="bg-blue-50 rounded-lg p-4 sm:p-6">
+                <div className="text-4xl sm:text-6xl font-bold mb-2 text-blue-600">{percentage}%</div>
+                <div className="text-sm sm:text-base text-gray-700">Accuracy</div>
+                <div className="text-xs sm:text-sm text-gray-600 mt-1">
+                  {score} out of {questions.length} correct
+                </div>
+              </div>
+              
+              {/* Fluency Score */}
+              <div className={`rounded-lg p-4 sm:p-6 ${isAboveThreshold ? 'bg-green-50' : 'bg-red-50'}`}>
+                <div className={`text-2xl sm:text-4xl font-bold mb-2 ${isAboveThreshold ? 'text-green-600' : 'text-red-600'}`}>
+                  {correctResponsesPerMinute.toFixed(1)}
+                </div>
+                <div className="text-sm sm:text-base text-gray-700">Correct/min</div>
+                <div className="text-xs sm:text-sm text-gray-600 mt-1">
+                  Target: {threshold}/min
+                </div>
+              </div>
+              
+              {/* Time Taken */}
+              <div className="bg-purple-50 rounded-lg p-4 sm:p-6">
+                <div className="text-2xl sm:text-4xl font-bold mb-2 text-purple-600">
+                  {totalQuizTimeMinutes.toFixed(1)}
+                </div>
+                <div className="text-sm sm:text-base text-gray-700">Minutes</div>
+                <div className="text-xs sm:text-sm text-gray-600 mt-1">
+                  Total time
+                </div>
+              </div>
+            </div>
+
+            {/* Performance Analysis */}
+            <div className="bg-gray-50 rounded-lg p-4 sm:p-6 mb-6">
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 text-gray-900">Performance Analysis</h3>
+              
+              {/* Rate Bar */}
+              <div className="relative w-full h-6 sm:h-8 bg-gray-200 rounded-lg overflow-hidden mb-3">
+                {/* Threshold line */}
+                <div className="absolute left-0 top-0 w-px h-full bg-gray-400 z-10"></div>
+                
+                {/* Performance bar */}
+                {isAboveThreshold ? (
+                  <div 
+                    className="h-full bg-green-500 transition-all duration-1000 ease-out"
+                    style={{ width: `${barPercentage}%` }}
+                  ></div>
+                ) : (
+                  <div className="h-full bg-red-500 opacity-50"></div>
+                )}
+                
+                {/* Rate indicator */}
+                <div className="absolute inset-0 flex items-center justify-center text-white font-semibold text-xs sm:text-sm">
+                  {isAboveThreshold 
+                    ? `+${rateScore.toFixed(1)} above target!` 
+                    : `${(threshold - correctResponsesPerMinute).toFixed(1)} below target`
+                  }
+                </div>
+              </div>
+              
+              <div className="text-xs sm:text-sm text-gray-600">
+                {isAboveThreshold 
+                  ? "Excellent fluency! You're answering quickly and accurately." 
+                  : "Focus on building speed while maintaining accuracy."
+                }
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center">
+              <button
+                onClick={() => window.location.href = '/'}
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              >
+                Return Home
+              </button>
+              
+              <button
+                onClick={resetQuiz}
+                className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-medium"
+              >
+                Take Another Quiz
+              </button>
+              
+              {user && (
+                <button
+                  onClick={() => router.push('/progress')}
+                  className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                >
+                  View Progress History
+                </button>
+              )}
             </div>
           </div>
-          
-          <div className="text-xs text-gray-500 mt-2">
-            Based on total quiz time (including time on incorrect responses)
-          </div>
         </div>
-        
-        <button
-          onClick={resetQuiz}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Take Another Quiz
-        </button>
       </div>
     )
   }
 
-  // If a specific quiz was selected from landing page, show name input and start button
+  // If a specific quiz was selected from landing page, show start button
   if (selectedQuiz && !questions.length) {
+    const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student'
+    
     return (
       <div className="max-w-2xl mx-auto p-6">
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-3xl font-bold text-center mb-2">{selectedQuiz.title}</h1>
+          <h1 className="text-3xl font-bold text-center mb-2 text-gray-900">{selectedQuiz.title}</h1>
           <p className="text-gray-600 text-center mb-8">{selectedQuiz.description}</p>
           
-          {/* Student name input */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium mb-2">Your Name:</label>
-            <input
-              type="text"
-              value={studentName}
-              onChange={(e) => setStudentName(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Enter your name..."
-            />
-          </div>
+          {user && (
+            <p className="text-center text-gray-700 mb-6">
+              Ready to start, {displayName}?
+            </p>
+          )}
 
           <button
             onClick={() => startQuiz(selectedQuiz)}
@@ -306,151 +526,123 @@ export default function QuizTaker() {
     const isAboveThreshold = currentRate >= threshold
 
     return (
-      <div className="flex max-w-6xl mx-auto p-6 gap-6">
-        {/* Main content area */}
-        <div className="flex-1">
-          {/* Progress bar */}
-          <div className="mb-6">
-            <div className="flex justify-between text-sm text-gray-600 mb-2">
-              <span>Question {currentQuestionIndex + 1} of {questions.length}</span>
-              <div className="flex gap-4">
-                <span>{score} correct so far</span>
-                {score > 0 && (
-                  <span className={`font-medium text-lg ${
-                    currentRate >= 30 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {currentRate.toFixed(1)} correct/min
-                  </span>
-                )}
-              </div>
+      <div className="min-h-screen bg-gray-100">
+        {/* Header with Return Home button */}
+        <div className="bg-white shadow-sm border-b">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4">
+            <div className="flex-1">
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{selectedQuiz.title}</h1>
+              <p className="text-sm text-gray-600">Question {currentQuestionIndex + 1} of {questions.length}</p>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              ></div>
-            </div>
-          </div>
-
-          {/* Question */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold mb-6">{currentQuestion.question_text}</h2>
-
-            {/* Answer options */}
-            <div className="space-y-3 mb-6">
-              {currentQuestion.answer_options
-                .sort((a, b) => a.option_letter.localeCompare(b.option_letter))
-                .map((option) => (
-                <label
-                  key={option.option_letter}
-                  className={`block p-4 border rounded-lg cursor-pointer transition-colors ${
-                    selectedAnswer === option.option_letter
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-300 hover:border-gray-400'
-                  } ${showFeedback ? 'cursor-not-allowed' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="answer"
-                    value={option.option_letter}
-                    checked={selectedAnswer === option.option_letter}
-                    onChange={(e) => setSelectedAnswer(e.target.value)}
-                    disabled={showFeedback}
-                    className="mr-3"
-                  />
-                  <span className="font-medium">{option.option_letter}.</span> {option.option_text}
-                </label>
-              ))}
-            </div>
-
-            {/* Feedback */}
-            {showFeedback && (
-              <div className={`p-4 rounded-lg mb-6 ${
-                selectedAnswer === currentQuestion.correct_answer
-                  ? 'bg-green-100 border border-green-300'
-                  : 'bg-red-100 border border-red-300'
-              }`}>
-                <div className="font-semibold mb-2">
-                  {selectedAnswer === currentQuestion.correct_answer ? '✅ Correct!' : '❌ Incorrect'}
-                </div>
-                <div className="text-sm">
-                  <strong>Correct Answer:</strong> {currentQuestion.correct_answer}
-                </div>
-                <div className="text-sm mt-2">
-                  <strong>Explanation:</strong> {currentQuestion.explanation}
-                </div>
-              </div>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex justify-end">
-              {!showFeedback ? (
-                <button
-                  onClick={submitAnswer}
-                  disabled={!selectedAnswer}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >
-                  Submit Answer
-                </button>
-              ) : (
-                <button
-                  onClick={nextQuestion}
-                  className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
-                >
-                  {currentQuestionIndex < questions.length - 1 ? 'Next Question' : 'Finish Quiz'}
-                </button>
-              )}
-            </div>
+            <button
+              onClick={() => window.location.href = '/'}
+              className="bg-gray-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm sm:text-base whitespace-nowrap"
+            >
+              Return Home
+            </button>
           </div>
         </div>
 
-        {/* Fluency bar sidebar */}
-        {score > 0 && (
-          <div className="w-32 flex flex-col items-center">
-            <h3 className="text-lg font-semibold mb-4 text-center">Fluency Target</h3>
-            
-            {/* Vertical bar */}
-            <div className="relative w-8 h-80 bg-gray-200 rounded-lg border-2 border-gray-300 mb-4">
-              {/* Scale markings */}
-              <div className="absolute -left-12 top-0 bottom-0 flex flex-col justify-between text-xs text-gray-600">
-                <span>60</span>
-                <span>45</span>
-                <span className="font-bold">30</span>
-                <span>15</span>
-                <span>0</span>
+        <div className="max-w-4xl mx-auto p-4 sm:p-6">
+          {/* Main content area */}
+          <div className="w-full">
+            {/* Progress bar */}
+            <div className="mb-4 sm:mb-6">
+              <div className="flex flex-col sm:flex-row justify-between text-sm text-gray-600 mb-2 gap-1 sm:gap-4">
+                <span className="font-medium">Question {currentQuestionIndex + 1} of {questions.length}</span>
+                <div className="flex flex-col sm:flex-row gap-1 sm:gap-4">
+                  <span className="text-sm">{score} correct so far</span>
+                  {score > 0 && (
+                    <span className={`font-bold text-base sm:text-lg ${
+                      currentRate >= 30 ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {currentRate.toFixed(1)} correct/min
+                    </span>
+                  )}
+                </div>
               </div>
-              
-              {/* Threshold line */}
-              <div 
-                className="absolute left-0 right-0 h-1 bg-gray-700 z-20"
-                style={{ bottom: `${thresholdPercentage}%` }}
-              ></div>
-              <div 
-                className="absolute -right-8 text-xs text-gray-700 font-bold"
-                style={{ bottom: `${thresholdPercentage - 1}%` }}
-              >
-                TARGET
+              <div className="w-full bg-gray-200 rounded-full h-2 sm:h-2">
+                <div 
+                  className="bg-blue-600 h-2 sm:h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                ></div>
               </div>
-              
-              {/* Performance bar */}
-              <div 
-                className={`absolute bottom-0 left-0 right-0 rounded-lg transition-all duration-1000 ease-out ${
-                  isAboveThreshold ? 'bg-green-500' : 'bg-red-500'
-                }`}
-                style={{ height: `${barPercentage}%` }}
-              ></div>
             </div>
-            
-            {/* Current rate display */}
-            <div className="text-center">
-              <div className={`text-sm font-medium ${
-                isAboveThreshold ? 'text-green-600' : 'text-red-600'
-              }`}>
-                {currentRate.toFixed(1)}/min
+
+            {/* Question */}
+            <div className="bg-white rounded-lg shadow-lg p-4 sm:p-6">
+              <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 leading-relaxed text-gray-900">{currentQuestion.question_text}</h2>
+
+              {/* Answer options */}
+              <div className="space-y-3 mb-4 sm:mb-6">
+                {currentQuestion.answer_options
+                  .sort((a, b) => a.option_letter.localeCompare(b.option_letter))
+                  .map((option) => (
+                  <label
+                    key={option.option_letter}
+                    className={`block p-3 sm:p-4 border rounded-lg cursor-pointer transition-colors ${
+                      selectedAnswer === option.option_letter
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-300 hover:border-gray-400'
+                    } ${showFeedback ? 'cursor-not-allowed' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="answer"
+                      value={option.option_letter}
+                      checked={selectedAnswer === option.option_letter}
+                      onChange={(e) => setSelectedAnswer(e.target.value)}
+                      disabled={showFeedback}
+                      className="mr-3 mt-0.5 flex-shrink-0"
+                    />
+                    <span className="text-sm sm:text-base text-gray-900 leading-relaxed">
+                      <span className="font-medium">{option.option_letter}.</span> {option.option_text}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              {/* Feedback */}
+              {showFeedback && (
+                <div className={`p-3 sm:p-4 rounded-lg mb-4 sm:mb-6 ${
+                  selectedAnswer === currentQuestion.correct_answer
+                    ? 'bg-green-100 border border-green-300'
+                    : 'bg-red-100 border border-red-300'
+                }`}>
+                  <div className="font-semibold mb-2 text-sm sm:text-base text-gray-900">
+                    {selectedAnswer === currentQuestion.correct_answer ? '✅ Correct!' : '❌ Incorrect'}
+                  </div>
+                  <div className="text-sm text-gray-800 mb-1">
+                    <strong>Correct Answer:</strong> {currentQuestion.correct_answer}
+                  </div>
+                  <div className="text-sm text-gray-800 leading-relaxed">
+                    <strong>Explanation:</strong> {currentQuestion.explanation}
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex justify-center sm:justify-end">
+                {!showFeedback ? (
+                  <button
+                    onClick={submitAnswer}
+                    disabled={!selectedAnswer}
+                    className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 sm:py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                  >
+                    Submit Answer
+                  </button>
+                ) : (
+                  <button
+                    onClick={nextQuestion}
+                    className="w-full sm:w-auto bg-green-600 text-white px-6 py-3 sm:py-2 rounded-lg hover:bg-green-700 font-medium"
+                  >
+                    {currentQuestionIndex < questions.length - 1 ? 'Next Question' : 'Finish Quiz'}
+                  </button>
+                )}
               </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
     )
   }
@@ -475,7 +667,7 @@ export default function QuizTaker() {
       {/* Available quizzes */}
       <div className="space-y-4">
         {quizzes.length === 0 ? (
-          <p className="text-gray-600 text-center">No quizzes available yet.</p>
+          <p className="text-gray-600 text-center">No free quizzes available. Please return to the main page to purchase premium quizzes.</p>
         ) : (
           quizzes.map((quiz) => (
             <div key={quiz.id} className="bg-white p-6 rounded-lg shadow-md">

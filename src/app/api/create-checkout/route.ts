@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log('Request body:', body)
     
-    const { quizId, userEmail } = body
+    const { quizId, userEmail, userId } = body
 
     // Validate input
     if (!quizId || !userEmail) {
@@ -56,7 +56,60 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check if user already owns this quiz (for authenticated users)
+    if (userId) {
+      console.log('Checking if authenticated user already owns quiz:', userId)
+      
+      const { data: existingPurchase } = await supabase
+        .from('purchases')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('quiz_id', quizId)
+        .eq('status', 'completed')
+        .single()
+
+      if (existingPurchase) {
+        console.log('User already owns this quiz')
+        return NextResponse.json(
+          { error: 'You already own this quiz. Check your dashboard to access it.' },
+          { status: 400 }
+        )
+      }
+    } else {
+      // Check for guest purchases by email
+      console.log('Checking if guest email already purchased quiz:', userEmail)
+      
+      const { data: existingPurchase } = await supabase
+        .from('purchases')
+        .select('id')
+        .eq('user_email', userEmail)
+        .eq('quiz_id', quizId)
+        .eq('status', 'completed')
+        .single()
+
+      if (existingPurchase) {
+        console.log('Email already purchased this quiz')
+        return NextResponse.json(
+          { error: 'This email has already purchased this quiz.' },
+          { status: 400 }
+        )
+      }
+    }
+
     console.log('Creating Stripe session for quiz:', quiz.title, 'Price:', quiz.price)
+
+    // Create enhanced metadata for linking purchases
+    const metadata: { [key: string]: string } = {
+      quizId: quiz.id,
+      userEmail: userEmail,
+      quizTitle: quiz.title,
+    }
+
+    // Add userId to metadata if user is authenticated
+    if (userId) {
+      metadata.userId = userId
+      console.log('Adding userId to metadata:', userId)
+    }
 
     // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
@@ -76,16 +129,13 @@ export async function POST(request: NextRequest) {
       ],
       mode: 'payment',
       customer_email: userEmail,
-      metadata: {
-        quizId: quiz.id,
-        userEmail: userEmail,
-        quizTitle: quiz.title,
-      },
+      metadata,
       success_url: `${request.nextUrl.origin}/quiz-access?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${request.nextUrl.origin}/?cancelled=true`,
     })
 
     console.log('Stripe session created successfully:', session.id)
+    console.log('Session metadata:', metadata)
 
     return NextResponse.json({ sessionId: session.id })
   } catch (error) {
