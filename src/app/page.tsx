@@ -264,7 +264,7 @@ export default function LandingPage() {
                   <p className="text-blue-600 font-semibold mb-1">Dr May PhD BCBA-D</p>
                   <p className="text-gray-700 font-medium mb-3">Associate Professor in Behaviour Analysis</p>
                   <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                    "I've designed these quizzes to help you on your journey to achieving real mastery"
+                    &ldquo;I&apos;ve designed these quizzes to help you achieve real fluency and track meaningful progress. Let&apos;s learn together!&rdquo;
                   </p>
                   <a
                     href="https://richardjmay.github.io/"
@@ -297,7 +297,7 @@ export default function LandingPage() {
                   <span className="text-white text-2xl">⚡</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Expert-Designed Assessments</h3>
-                <p className="text-gray-600">Dr May's proven methodology tracks your speed and accuracy with advanced analytics that monitor 30+ correct answers per minute</p>
+                <p className="text-gray-600">Dr May&apos;s proven methodology tracks your speed and accuracy with advanced analytics that monitor 30+ correct answers per minute</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
@@ -305,7 +305,7 @@ export default function LandingPage() {
                   <span className="text-white text-2xl">📊</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Professional Progress Analytics</h3>
-                <p className="text-gray-600">Visualize your improvement with Dr May's professional charts and detailed performance metrics designed for optimal learning outcomes</p>
+                <p className="text-gray-600">Visualize your improvement with Dr May&apos;s professional charts and detailed performance metrics designed for optimal learning outcomes</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
@@ -313,7 +313,7 @@ export default function LandingPage() {
                   <span className="text-white text-2xl">🎯</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Personalized Learning Path</h3>
-                <p className="text-gray-600">Access Dr May's curated content anytime, track your attempts, and focus on areas that need improvement with expert guidance</p>
+                <p className="text-gray-600">Access Dr May&apos;s curated content anytime, track your attempts, and focus on areas that need improvement with expert guidance</p>
               </div>
             </div>
           </section>
@@ -325,7 +325,7 @@ export default function LandingPage() {
             <div className="text-center mb-8">
               <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Your Learning Dashboard</h2>
               <p className="text-xl text-gray-600">
-                Continue your journey with Dr May's expert guidance
+                Continue your journey with Dr May&apos;s expert guidance
               </p>
             </div>
             
@@ -338,7 +338,7 @@ export default function LandingPage() {
                   onClick={() => setShowMyQuizzes(false)}
                   className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
-                  Browse Dr May's Quizzes
+                  Browse Dr May&apos;s Quizzes
                 </button>
               </div>
             ) : (
@@ -372,7 +372,7 @@ export default function LandingPage() {
                 onClick={() => setShowMyQuizzes(false)}
                 className="text-blue-600 hover:text-blue-800 underline font-medium"
               >
-                Browse More of Dr May's Quizzes
+                Browse More of Dr May&apos;s Quizzes
               </button>
             </div>
           </div>
@@ -385,12 +385,12 @@ export default function LandingPage() {
               <div className="text-center mb-12">
                 <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Choose Your Learning Path</h2>
                 <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                  Dr May's interactive quizzes with immediate feedback and advanced fluency tracking to accelerate your learning
+                  Dr May&apos;s interactive quizzes with immediate feedback and advanced fluency tracking to accelerate your learning
                 </p>
                 {!user && (
                   <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
                     <p className="text-blue-700 font-medium">
-                      💡 Create a free account to track your progress and access Dr May's purchased content anytime!
+                      💡 Create a free account to track your progress and access Dr May&apos;s purchased content anytime!
                     </p>
                   </div>
                 )}
@@ -399,8 +399,8 @@ export default function LandingPage() {
               {quizzes.length === 0 ? (
                 <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
                   <div className="text-6xl mb-4">📚</div>
-                  <h3 className="text-2xl font-semibold text-gray-700 mb-2">Dr May's New Quizzes Coming Soon!</h3>
-                  <p className="text-gray-600">We're preparing amazing content for you. Check back soon!</p>
+                  <h3 className="text-2xl font-semibold text-gray-700 mb-2">Dr May&apos;s New Quizzes Coming Soon!</h3>
+                  <p className="text-gray-600">We&apos;re preparing amazing content for you. Check back soon!</p>
                 </div>
               ) : (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -419,7 +419,7 @@ export default function LandingPage() {
                           {!quiz.is_free && (
                             <div className="mb-6">
                               <span className="inline-flex items-center bg-gradient-to-r from-blue-100 to-purple-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full">
-                                💎 Dr May's Premium - ${quiz.price}
+                                💎 Dr May&apos;s Premium - ${quiz.price}
                               </span>
                             </div>
                           )}
@@ -436,7 +436,7 @@ export default function LandingPage() {
                               onClick={() => startFreeQuiz(quiz)}
                               className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                             >
-                              🆓 Start Dr May's Free Quiz
+                              🆓 Start Dr May&apos;s Free Quiz
                             </button>
                           ) : (
                             <PaymentButton
@@ -464,6 +464,43 @@ export default function LandingPage() {
         mode={authMode}
         onSwitchMode={(newMode: 'login' | 'register' | 'reset') => setAuthMode(newMode)}
       />
+
+      {/* Footer */}
+      <footer className="bg-white/80 backdrop-blur-sm border-t border-gray-200/50 mt-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
+            <div className="flex items-center space-x-3">
+              <div className="w-6 h-6 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-xs">Q</span>
+              </div>
+              <span className="text-gray-600">© 2025 Dr May&apos;s Quiz Master Pro</span>
+            </div>
+            
+            <div className="flex space-x-6 text-sm">
+              <a 
+                href="/privacy" 
+                className="text-gray-600 hover:text-blue-600 transition-colors"
+              >
+                Privacy Policy
+              </a>
+              <a 
+                href="/terms" 
+                className="text-gray-600 hover:text-blue-600 transition-colors"
+              >
+                Terms of Service
+              </a>
+              <a 
+                href="https://richardjmay.github.io/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-gray-600 hover:text-blue-600 transition-colors"
+              >
+                About Dr May
+              </a>
+            </div>
+          </div>
+        </div>
+      </footer>
 
       {/* Floating Elements */}
       <div className="fixed top-20 left-4 w-20 h-20 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full opacity-20 animate-pulse"></div>
