@@ -1,11 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { stripe } from '@/lib/stripe'
 import { supabase } from '@/lib/supabase'
+import { rateLimit, getClientIP } from '@/lib/rate-limit'
 
 export async function POST(request: NextRequest) {
   console.log('=== Checkout API called ===')
   
   try {
+    // Apply rate limiting first - 5 payment attempts per minute per IP
+    const clientIP = getClientIP(request)
+    const { success, remaining, resetTime } = rateLimit(
+      `payment_${clientIP}`, 
+      5, // 5 attempts per minute
+      60000 // 1 minute window
+    )
+
+    if (!success) {
+      console.log(`Rate limit exceeded for IP: ${clientIP}`)
+      return NextResponse.json(
+        { 
+          error: 'Too many payment attempts. Please wait before trying again.',
+          resetTime: new Date(resetTime).toISOString()
+        },
+        { 
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': '5',
+            'X-RateLimit-Remaining': remaining.toString(),
+            'X-RateLimit-Reset': resetTime.toString()
+          }
+        }
+      )
+    }
+
+    console.log(`Rate limit check passed. Remaining attempts: ${remaining}`)
+
     // Check if Stripe is configured
     if (!stripe) {
       console.log('ERROR: Stripe not configured')
@@ -137,7 +166,17 @@ export async function POST(request: NextRequest) {
     console.log('Stripe session created successfully:', session.id)
     console.log('Session metadata:', metadata)
 
-    return NextResponse.json({ sessionId: session.id })
+    // Add rate limit headers to successful responses too
+    return NextResponse.json(
+      { sessionId: session.id },
+      {
+        headers: {
+          'X-RateLimit-Limit': '5',
+          'X-RateLimit-Remaining': remaining.toString(),
+          'X-RateLimit-Reset': resetTime.toString()
+        }
+      }
+    )
   } catch (error) {
     console.error('Stripe checkout error:', error)
     return NextResponse.json(
