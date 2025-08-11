@@ -19,6 +19,7 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [showLoginSuggestion, setShowLoginSuggestion] = useState(false)
 
   const { signIn, signUp, resetPassword } = useAuth()
 
@@ -27,6 +28,7 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
     setLoading(true)
     setError('')
     setMessage('')
+    setShowLoginSuggestion(false)
 
     try {
       if (mode === 'login') {
@@ -50,11 +52,9 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
         if (error) {
           setError(error.message)
         } else {
-          setMessage('Account created! Please check your email to confirm.')
-          setTimeout(() => {
-            onClose()
-            resetForm()
-          }, 2000)
+          setMessage('Registration submitted! Please check your email for confirmation.')
+          setShowLoginSuggestion(true)
+          // Don't auto-close, let user choose their next action
         }
       } else if (mode === 'reset') {
         const { error } = await resetPassword(email)
@@ -81,11 +81,22 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
     setFullName('')
     setError('')
     setMessage('')
+    setShowLoginSuggestion(false)
   }
 
   const handleClose = () => {
     resetForm()
     onClose()
+  }
+
+  const handleTryLogin = () => {
+    setShowLoginSuggestion(false)
+    onSwitchMode('login')
+    // Keep email but clear other fields
+    setPassword('')
+    setFullName('')
+    setError('')
+    setMessage('')
   }
 
   const getTitle = () => {
@@ -176,14 +187,39 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
           )}
 
           {error && (
-            <div className="text-red-600 text-sm bg-red-50 p-2 rounded">
+            <div className="text-red-600 text-sm bg-red-50 p-3 rounded">
               {error}
             </div>
           )}
 
           {message && (
-            <div className="text-green-600 text-sm bg-green-50 p-2 rounded">
+            <div className="text-green-600 text-sm bg-green-50 p-3 rounded">
               {message}
+            </div>
+          )}
+
+          {/* Login Suggestion Box */}
+          {message && showLoginSuggestion && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-blue-800 text-sm mb-3">
+                📧 <strong>No email received?</strong> You might already have an account with this email address.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleTryLogin}
+                  className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition-colors"
+                >
+                  Try Logging In Instead
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowLoginSuggestion(false)}
+                  className="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-300 transition-colors"
+                >
+                  I&apos;ll Wait for Email
+                </button>
+              </div>
             </div>
           )}
 
@@ -209,12 +245,12 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
                 onClick={() => onSwitchMode('register')}
                 className="text-blue-600 hover:text-blue-800 text-sm"
               >
-                Don't have an account? Sign up
+                Don&apos;t have an account? Sign up
               </button>
             </>
           )}
           
-          {mode === 'register' && (
+          {mode === 'register' && !showLoginSuggestion && (
             <button
               onClick={() => onSwitchMode('login')}
               className="text-blue-600 hover:text-blue-800 text-sm"
