@@ -145,17 +145,17 @@ export default function LandingPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Modern Header */}
       <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col space-y-3 sm:flex-row sm:justify-between sm:items-center sm:space-y-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+          <div className="flex flex-col space-y-3 sm:flex-row sm:justify-between sm:items-center sm:space-y-0 min-w-0">
             <div className="flex items-center space-x-3">
-              {/* New Professional Logo - Larger for Desktop */}
-              <div className="relative">
+              {/* New Professional Logo - Fixed Mobile Width */}
+              <div className="relative min-w-0 flex-shrink-0">
                 <Image
                   src="/images/logo-header.png"
                   alt="Dr May's Adaptive Learning Analytics"
                   width={320}
                   height={80}
-                  className="h-16 w-auto sm:h-20 sm:w-auto"
+                  className="h-10 w-auto sm:h-14 md:h-16 lg:h-20 max-w-none"
                 />
               </div>
             </div>
@@ -164,7 +164,7 @@ export default function LandingPage() {
               {user ? (
                 <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
                   <span className="text-gray-700 text-sm sm:text-base">
-                    Welcome back, {user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'}! 👋
+                    Welcome, {user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'User'}
                   </span>
                   <div className="flex space-x-2 sm:space-x-3">
                     <button
@@ -230,13 +230,13 @@ export default function LandingPage() {
                 </div>
                 
                 <h2 className="text-4xl sm:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-                  Personalised Learning Pathways
+                  Master Skills with
                   <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent block sm:inline">
-                    {' '}for BCBA Exam Success
+                    {' '}Dr May's Expert Guidance
                   </span>
                 </h2>
                 <p className="text-xl sm:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto lg:mx-0 leading-relaxed">
-                  "Master your BCBA prep with Dr May’s personalised platform — build fluency, measure progress, connect with peers, and join weekly live drop-in sessions."
+                  Track your fluency, measure progress, and achieve learning goals with our advanced analytics platform designed by Dr May
                 </p>
                 
                 {!user && (
@@ -259,19 +259,19 @@ export default function LandingPage() {
                     <Image
                       src="/images/dr-may-profile.jpg"
                       alt="Dr May - Learning Expert"
-                      width={200}
-                      height={200}
+                      width={150}
+                      height={150}
                       className="rounded-full mx-auto border-4 border-gradient-to-r from-blue-600 to-purple-600 shadow-lg"
                     />
                     <div className="absolute -bottom-2 -right-2 bg-green-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold">
                       ✓
                     </div>
                   </div>
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Dr Rich May</h3>
-                  <p className="text-blue-600 font-semibold mb-1">Richard May PhD BCBA-D</p>
-                  <p className="text-gray-700 font-medium mb-3">Associate Professor in Behaviour Analysis, University of South Wales</p>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Dr May</h3>
+                  <p className="text-blue-600 font-semibold mb-1">Dr May PhD BCBA-D</p>
+                  <p className="text-gray-700 font-medium mb-3">Associate Professor in Behaviour Analysis</p>
                   <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                    &ldquo;I&apos;ve designed these activities to help you achieve meaningful progress and real fluency. Let&apos;s learn together!&rdquo;
+                    &ldquo;I&apos;ve designed these quizzes to help you achieve real fluency and track meaningful progress. Let&apos;s learn together!&rdquo;
                   </p>
                   <a
                     href="https://richardjmay.github.io/"
@@ -292,9 +292,9 @@ export default function LandingPage() {
         {/* Features Section */}
         {!showMyQuizzes && (
           <section className="mb-16">
-            <div className="text-center mb-12">
-              <h2 className="relative top-5 text-3xl font-bold text-gray-900 mb-4">Why Choose Dr May's Platform?</h2>
-              <p className="relative top-4 text-xl text-gray-600 max-w-3xl mx-auto">
+           <div className="text-center mb-12 mt-8">
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">Why Choose Dr May's Platform?</h2>
+              <p className="text-xl text-gray-600 max-w-3xl mx-auto">
                 Professionally designed learning experiences with proven methodology
               </p>
             </div>
@@ -304,23 +304,23 @@ export default function LandingPage() {
                   <span className="text-white text-2xl">⚡</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Expert-Designed Assessments</h3>
-                <p className="text-gray-600">Fluency-based instruction designed by experts in learning to help you build speed, accuracy, and long-term retention.</p>
+                <p className="text-gray-600">Dr May&apos;s proven methodology tracks your speed and accuracy with advanced analytics that monitor 30+ correct answers per minute</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
                 <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl flex items-center justify-center mb-4">
                   <span className="text-white text-2xl">📊</span>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Progress Analytics</h3>
-                <p className="text-gray-600">Performance metrics and graphical displays design to provide insights into your progress, helping you target areas for improvement</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Professional Progress Analytics</h3>
+                <p className="text-gray-600">Visualize your improvement with Dr May&apos;s professional charts and detailed performance metrics designed for optimal learning outcomes</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
                 <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl flex items-center justify-center mb-4">
                   <span className="text-white text-2xl">🎯</span>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Weekly Live Drop-In Sessions</h3>
-                <p className="text-gray-600">Join Dr May for interactive Q&A and personalised study guidance every week.</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Personalized Learning Path</h3>
+                <p className="text-gray-600">Access Dr May&apos;s curated content anytime, track your attempts, and focus on areas that need improvement with expert guidance</p>
               </div>
             </div>
           </section>
@@ -477,9 +477,13 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
             <div className="flex items-center space-x-3">
-              <div className="w-6 h-6 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-xs">Q</span>
-              </div>
+              <Image
+                src="/images/icon.png"
+                alt="Dr May's Adaptive Learning Analytics"
+                width={24}
+                height={24}
+                className="w-6 h-6"
+              />
               <span className="text-gray-600">© 2025 Dr May&apos;s Adaptive Learning Analytics</span>
             </div>
             
