@@ -39,6 +39,16 @@ export default function LandingPage() {
   const { user, signOut, loading: authLoading } = useAuth()
 
   useEffect(() => {
+    // Clear payment state when loading home page
+    console.log('Home page loaded, clearing payment state');
+    sessionStorage.clear();
+    localStorage.removeItem('stripe_payment_intent');
+    
+    // Clear any stuck Stripe iframes
+    const stripeIframes = document.querySelectorAll('iframe[name*="Stripe"]');
+    stripeIframes.forEach(iframe => iframe.remove());
+
+    // Load quizzes and user data
     loadQuizzes()
     if (user) {
       loadPurchasedQuizzes()
