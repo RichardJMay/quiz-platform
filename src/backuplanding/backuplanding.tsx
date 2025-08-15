@@ -3,18 +3,17 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import PaymentButton from '@/components/payment/PaymentButton'
 import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '../contexts/AuthContext'
 import Image from 'next/image'
-import { ArrowRight } from 'lucide-react'
 
-interface Category {
+interface Quiz {
   id: string
-  name: string
+  title: string
   description: string
-  icon_name: string
-  color_class: string
-  quizzes: { count: number }[]
+  price: number
+  is_free: boolean
 }
 
 interface PurchasedQuiz {
@@ -28,7 +27,7 @@ interface PurchasedQuiz {
 }
 
 export default function LandingPage() {
-  const [categories, setCategories] = useState<Category[]>([])
+  const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [purchasedQuizzes, setPurchasedQuizzes] = useState<PurchasedQuiz[]>([])
   const [loading, setLoading] = useState(true)
   const [authModalOpen, setAuthModalOpen] = useState(false)
@@ -38,42 +37,38 @@ export default function LandingPage() {
   const { user, signOut, loading: authLoading } = useAuth()
 
   useEffect(() => {
-    console.log('Home page loaded, clearing payment state');
+  console.log('Home page loaded, clearing payment state');
+  
+  // Wrap potentially failing operations in try/catch
+  try {
+    sessionStorage.clear();
+    localStorage.removeItem('stripe_payment_intent');
     
-    // Wrap potentially failing operations in try/catch
-    try {
-      sessionStorage.clear();
-      localStorage.removeItem('stripe_payment_intent');
-      
-      // Clear any stuck Stripe iframes
-      const stripeIframes = document.querySelectorAll('iframe[name*="Stripe"]');
-      stripeIframes.forEach(iframe => iframe.remove());
-    } catch (error) {
-      console.log('Storage/DOM cleanup failed:', error);
-      // Don't let cleanup errors break the page loading
-    }
-    
-    // Always run these, even if cleanup failed
-    loadCategories()
-    if (user) {
-      loadPurchasedQuizzes()
-    }
-  }, [user])
+    // Clear any stuck Stripe iframes
+    const stripeIframes = document.querySelectorAll('iframe[name*="Stripe"]');
+    stripeIframes.forEach(iframe => iframe.remove());
+  } catch (error) {
+    console.log('Storage/DOM cleanup failed:', error);
+    // Don't let cleanup errors break the page loading
+  }
+  
+  // Always run these, even if cleanup failed
+  loadQuizzes()
+  if (user) {
+    loadPurchasedQuizzes()
+  }
+}, [user])
 
-  const loadCategories = async () => {
+  const loadQuizzes = async () => {
     const { data, error } = await supabase
-      .from('quiz_categories')
-      .select(`
-        *,
-        quizzes(count)
-      `)
-      .eq('is_active', true)
-      .order('display_order')
+      .from('quizzes')
+      .select('id, title, description, price, is_free')
+      .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Error loading categories:', error)
+      console.error('Error loading quizzes:', error)
     } else {
-      setCategories(data || [])
+      setQuizzes(data || [])
     }
     setLoading(false)
   }
@@ -103,8 +98,8 @@ export default function LandingPage() {
     }
   }
 
-  const handleCategoryClick = (categoryId: string, categoryName: string) => {
-    router.push(`/category?id=${categoryId}&name=${encodeURIComponent(categoryName)}`)
+  const startFreeQuiz = (quiz: Quiz) => {
+    router.push(`/quiz?id=${quiz.id}`)
   }
 
   const startPurchasedQuiz = (quizId: string) => {
@@ -297,7 +292,7 @@ export default function LandingPage() {
                     href="https://richardjmay.github.io/"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                    className="inline-flex items-center bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                   >
                     🌐 About Dr May
                   </a>
@@ -365,7 +360,7 @@ export default function LandingPage() {
                   onClick={() => setShowMyQuizzes(false)}
                   className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
-                  Browse optibl Categories
+                  Browse optibl Quizzes
                 </button>
               </div>
             ) : (
@@ -399,20 +394,20 @@ export default function LandingPage() {
                 onClick={() => setShowMyQuizzes(false)}
                 className="text-blue-600 hover:text-blue-800 underline font-medium"
               >
-                Browse More optibl Categories
+                Browse More of optibl Quizzes
               </button>
             </div>
           </div>
         )}
 
-        {/* Categories Section */}
+        {/* Available Quizzes Section */}
         {!showMyQuizzes && (
           <>
             <section>
               <div className="text-center mb-12">
                 <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Choose Your optibl Learning Path</h2>
                 <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                  Expert-designed categories covering all aspects of BCBA exam preparation with fluency-based learning
+                  Interactive quizzes with immediate feedback and advanced fluency tracking to accelerate your learning
                 </p>
                 {!user && (
                   <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
@@ -423,40 +418,56 @@ export default function LandingPage() {
                 )}
               </div>
               
-              {categories.length === 0 ? (
+              {quizzes.length === 0 ? (
                 <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
                   <div className="text-6xl mb-4">📚</div>
-                  <h3 className="text-2xl font-semibold text-gray-700 mb-2">New optibl Categories Coming Soon!</h3>
+                  <h3 className="text-2xl font-semibold text-gray-700 mb-2">New optibl Quizzes Coming Soon!</h3>
                   <p className="text-gray-600">We&apos;re preparing amazing content for you. Check back soon!</p>
                 </div>
               ) : (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {categories.map((category) => {
-                    const quizCount = category.quizzes?.[0]?.count || 0
+                  {quizzes.map((quiz) => {
+                    const isOwned = user && purchasedQuizzes.some(p => p.quiz_id === quiz.id)
                     
                     return (
-                      <div
-                        key={category.id}
-                        onClick={() => handleCategoryClick(category.id, category.name)}
-                        className="group bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-200/50 hover:border-gray-300 transform hover:-translate-y-2"
-                      >
-                        <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4 transition-all duration-300">
-                          <span className="text-white text-2xl">📚</span>
-                        </div>
-                        
-                        <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-gray-700 transition-colors">
-                          {category.name}
-                        </h3>
-                        
-                        <p className="text-gray-600 mb-6 text-sm leading-relaxed">
-                          {category.description}
-                        </p>
-                        
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-gray-500">
-                            {quizCount} {quizCount === 1 ? 'Quiz' : 'Quizzes'}
-                          </span>
-                          <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all duration-300" />
+                      <div key={quiz.id} className={`bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50 ${isOwned ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-blue-500'}`}>
+                        <div className="p-8">
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-xl font-bold text-gray-900">{quiz.title}</h3>
+                            {isOwned && <span className="text-green-500 text-xl">✅</span>}
+                          </div>
+                          <p className="text-gray-600 mb-6">{quiz.description}</p>
+                          
+                          {!quiz.is_free && (
+                            <div className="mb-6">
+                              <span className="inline-flex items-center bg-gradient-to-r from-blue-100 to-purple-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full">
+                                💎 Dr May&apos;s Premium - ${quiz.price}
+                              </span>
+                            </div>
+                          )}
+                          
+                          {isOwned ? (
+                            <button
+                              onClick={() => startPurchasedQuiz(quiz.id)}
+                              className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                            >
+                              ✨ Take Quiz (Owned)
+                            </button>
+                          ) : quiz.is_free ? (
+                            <button
+                              onClick={() => startFreeQuiz(quiz)}
+                              className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                            >
+                              🆓 Start Dr May&apos;s Free Quiz
+                            </button>
+                          ) : (
+                            <PaymentButton
+                              quizId={quiz.id}
+                              price={quiz.price}
+                              title={quiz.title}
+                              className="w-full"
+                            />
+                          )}
                         </div>
                       </div>
                     )
@@ -483,7 +494,7 @@ export default function LandingPage() {
             <div className="flex items-center space-x-3">
               <Image
                 src="/images/icon.png"
-                alt="optibl icon"
+                alt="optibal icon"
                 width={24}
                 height={24}
                 className="w-6 h-6"
@@ -492,12 +503,6 @@ export default function LandingPage() {
             </div>
             
             <div className="flex space-x-6 text-sm">
-              <a 
-                href="/about" 
-                className="text-gray-600 hover:text-blue-600 transition-colors"
-              >
-                About optibl
-             </a>
               <a 
                 href="/privacy" 
                 className="text-gray-600 hover:text-blue-600 transition-colors"
