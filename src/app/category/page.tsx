@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import PaymentButton from '@/components/payment/PaymentButton'
@@ -31,7 +31,7 @@ interface PurchasedQuiz {
   purchased_at: string
 }
 
-export default function CategoryPage() {
+function CategoryPageContent() {
   const [category, setCategory] = useState<Category | null>(null)
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [purchasedQuizzes, setPurchasedQuizzes] = useState<PurchasedQuiz[]>([])
@@ -382,6 +382,12 @@ export default function CategoryPage() {
             
             <div className="flex space-x-6 text-sm">
               <a 
+                href="/about" 
+                className="text-gray-600 hover:text-blue-600 transition-colors"
+              >
+                About optibl
+              </a>
+              <a 
                 href="/privacy" 
                 className="text-gray-600 hover:text-blue-600 transition-colors"
               >
@@ -406,5 +412,20 @@ export default function CategoryPage() {
         </div>
       </footer>
     </div>
+  )
+}
+
+export default function CategoryPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="text-xl text-gray-700 animate-pulse">Loading category...</div>
+        </div>
+      </div>
+    }>
+      <CategoryPageContent />
+    </Suspense>
   )
 }
