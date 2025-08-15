@@ -285,9 +285,10 @@ export default function LandingPage() {
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">Dr Rich May</h3>
                   <p className="text-blue-600 font-semibold mb-1">Dr Richard May PhD BCBA-D</p>
-                  <p className="text-gray-700 font-medium mb-3">Associate Professor in Behaviour Analysis, University of South Wales</p>
+                  <p className="text-gray-700 font-medium mb-3">Founder and Head of Learning at optibl</p>
+                  <p className="text-gray-700 font-medium mb-3">Associate Professor of Behaviour Analysis</p>
                   <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                    &ldquo;I&apos;ve designed this BCBA exam preparation to help you achieve real mastery of the required task list concepts. Let&apos;s learn together!&rdquo;
+                    &ldquo;The opitbl BCBA exam preparation will help you achieve real mastery of the task list. Using the science of learning to teach the science of learning!&rdquo;
                   </p>
                   <a
                     href="https://richardjmay.github.io/"
@@ -309,9 +310,9 @@ export default function LandingPage() {
         {!showMyQuizzes && (
           <section className="mb-16">
            <div className="text-center mb-12 mt-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-4">Why Choose Dr May's Adaptive Learning Analytics?</h2>
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">What is optibl?</h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                Personalised and evidence-based instructional strategies designed to help you build mastery
+                optibl is a mastery engine — using the science of learning to keep you in the sweet spot for fast, lasting progress
               </p>
             </div>
             <div className="grid md:grid-cols-3 gap-8">
@@ -319,16 +320,16 @@ export default function LandingPage() {
                 <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4">
                   <span className="text-white text-2xl">⚡</span>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Expert-Designed Instruction and Assessment</h3>
-                <p className="text-gray-600">Fluency-based assessment and revision materials designed by experts in learning to help you build speed, accuracy, and long-term retention</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Science of learning</h3>
+                <p className="text-gray-600">Expertly sequenced and fluency-based assessment to help you build speed, accuracy, and long-term retention</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
                 <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl flex items-center justify-center mb-4">
                   <span className="text-white text-2xl">📊</span>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Progress Analytics using the lastest Machine Learning techniques </h3>
-                <p className="text-gray-600">Placement test, performance metrics and data displays designed to accelerate your progress and efficiently target areas for improvement</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Progress Analytics</h3>
+                <p className="text-gray-600">Placement tests, performance metrics and data analysis designed to boost your progress and identify areas for improvement</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
@@ -348,20 +349,20 @@ export default function LandingPage() {
             <div className="text-center mb-8">
               <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Your Learning Dashboard</h2>
               <p className="text-xl text-gray-600">
-                Continue your journey with Dr May&apos;s expert guidance
+                Continue your optibl journey
               </p>
             </div>
             
             {purchasedQuizzes.length === 0 ? (
               <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
                 <div className="text-6xl mb-4">🎓</div>
-                <h3 className="text-2xl font-semibold text-gray-700 mb-2">Ready to Start Learning with Dr May?</h3>
-                <p className="text-gray-600 mb-6">Purchase your first quiz below to unlock personalized progress tracking designed by Dr May!</p>
+                <h3 className="text-2xl font-semibold text-gray-700 mb-2">Ready to Start Learning with optibl?</h3>
+                <p className="text-gray-600 mb-6">Purchase your first quiz below to unlock personalized progress tracking</p>
                 <button
                   onClick={() => setShowMyQuizzes(false)}
                   className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
-                  Browse Dr May&apos;s Quizzes
+                  Browse optibl Quizzes
                 </button>
               </div>
             ) : (
@@ -395,7 +396,7 @@ export default function LandingPage() {
                 onClick={() => setShowMyQuizzes(false)}
                 className="text-blue-600 hover:text-blue-800 underline font-medium"
               >
-                Browse More of Dr May&apos;s Quizzes
+                Browse More of optibl Quizzes
               </button>
             </div>
           </div>
@@ -406,14 +407,14 @@ export default function LandingPage() {
           <>
             <section>
               <div className="text-center mb-12">
-                <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Choose Your Learning Path</h2>
+                <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Choose Your optibl Learning Path</h2>
                 <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                  Dr May&apos;s interactive quizzes with immediate feedback and advanced fluency tracking to accelerate your learning
+                  Interactive quizzes with immediate feedback and advanced fluency tracking to accelerate your learning
                 </p>
                 {!user && (
                   <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
                     <p className="text-blue-700 font-medium">
-                      💡 Create a free account to track your progress and access Dr May&apos;s purchased content anytime!
+                      💡 Create a free account to track your progress and access purchased content anytime!
                     </p>
                   </div>
                 )}
@@ -422,7 +423,7 @@ export default function LandingPage() {
               {quizzes.length === 0 ? (
                 <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
                   <div className="text-6xl mb-4">📚</div>
-                  <h3 className="text-2xl font-semibold text-gray-700 mb-2">Dr May&apos;s New Quizzes Coming Soon!</h3>
+                  <h3 className="text-2xl font-semibold text-gray-700 mb-2">New optibl Quizzes Coming Soon!</h3>
                   <p className="text-gray-600">We&apos;re preparing amazing content for you. Check back soon!</p>
                 </div>
               ) : (
@@ -495,12 +496,12 @@ export default function LandingPage() {
             <div className="flex items-center space-x-3">
               <Image
                 src="/images/icon.png"
-                alt="Dr May's Adaptive Learning Analytics"
+                alt="optibal icon"
                 width={24}
                 height={24}
                 className="w-6 h-6"
               />
-              <span className="text-gray-600">© 2025 Dr May&apos;s Adaptive Learning Analytics</span>
+              <span className="text-gray-600">© 2025 optibl</span>
             </div>
             
             <div className="flex space-x-6 text-sm">
