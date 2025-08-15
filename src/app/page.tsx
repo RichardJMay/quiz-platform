@@ -243,7 +243,9 @@ export default function LandingPage() {
                       alt="Dr May's Adaptive Learning Analytics"
                       width={480}
                       height={120}
-                      className="h-24 w-auto sm:h-28 sm:w-auto"
+                      className="w-[220px] h-auto sm:w-[320px] md:w-[480px]"
+                      priority
+                      sizes="(max-width: 640px) 220px, (max-width: 768px) 320px, 480px"
                     />
                   </div>
                 </div>
