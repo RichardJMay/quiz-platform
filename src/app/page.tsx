@@ -92,36 +92,48 @@ useEffect(() => {
 
 
 
-  const loadPurchasedQuizzes = async () => {
+  // In your landing page loadPurchasedQuizzes
+const loadPurchasedQuizzes = async () => {
   if (!user) return
 
   console.log('=== loadPurchasedQuizzes START ===');
-
+  
   try {
-    const result = await executeAuthQuery(async () => {
-      return await supabase
+    let { data, error } = await supabase
+      .from('purchases')
+      .select('quiz_id, purchased_at')
+      .eq('user_id', user.id)
+      .eq('status', 'completed')
+      .order('purchased_at', { ascending: false })
+
+    // Simple retry on auth error
+    if (error?.code === 'PGRST301' || error?.message?.includes('JWT')) {
+      console.log('Auth error detected, retrying...')
+      await supabase.auth.refreshSession()
+      // Retry once
+      const retry = await supabase
         .from('purchases')
         .select('quiz_id, purchased_at')
         .eq('user_id', user.id)
         .eq('status', 'completed')
         .order('purchased_at', { ascending: false })
-    }, { maxRetries: 3, retryDelay: 1000 })
+      
+      data = retry.data
+      error = retry.error
+    }
 
-    console.log('Purchases response:', result);
-
-    if (result.error) {
-      console.error('Error loading purchased quizzes:', result.error)
+    if (error) {
+      console.error('Error loading purchased quizzes:', error)
       setPurchasedQuizzes([])
     } else {
-      // Map to match expected interface with null quizzes
-      const typedData = (result.data || []).map((item: { quiz_id: string; purchased_at: string }) => ({
+      const typedData = (data || []).map((item: { quiz_id: string; purchased_at: string }) => ({
         ...item,
-        quizzes: null // Since we're not fetching quiz details anymore
+        quizzes: null
       }))
       setPurchasedQuizzes(typedData)
     }
   } catch (err) {
-    console.error('Purchases fetch failed after retries:', err);
+    console.error('Purchases fetch failed:', err);
     setPurchasedQuizzes([])
   } finally {
     console.log('=== loadPurchasedQuizzes END ===');
