@@ -1,13 +1,13 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, supabasePublic } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '../contexts/AuthContext'
 import Image from 'next/image'
 import { ArrowRight } from 'lucide-react'
-import { supabasePublic } from '@/lib/supabase'
+
 
 interface Category {
   id: string
@@ -39,6 +39,7 @@ export default function LandingPage() {
   const { user, signOut, loading: authLoading } = useAuth()
 
   const firstRun = useRef(false);
+  const fetchedOnce = useRef(false)
 
 useEffect(() => {
   console.log('Home page loaded, clearing payment state');
@@ -62,34 +63,12 @@ useEffect(() => {
 }, [user?.id]);
 
   const loadCategories = async () => {
-  console.log('=== loadCategories START ===', new Date().toISOString());
-  
-  try {
-    console.log('Making Supabase query...');
-    
-    const { data, error } = await supabasePublic
-      .from('quiz_categories')
-      .select(`*`)
-      .eq('is_active', true)
-      .order('display_order')
-
-    console.log('Supabase response:', { data, error });
-
-    if (error) {
-      console.error('Supabase error:', error)
-      setCategories([])
-    } else {
-      console.log('Setting categories:', data?.length || 0, 'items');
-      setCategories(data || [])
-    }
-  } catch (err) {
-    console.error('Unexpected error in loadCategories:', err);
-    setCategories([])
-  } finally {
-    console.log('=== loadCategories END - setting loading to false ===');
-    setLoading(false)
-  }
+  console.log('Skipping categories load for test');
+  setCategories([]);
+  setLoading(false);
 }
+
+
 
   const loadPurchasedQuizzes = async () => {
     if (!user) return
