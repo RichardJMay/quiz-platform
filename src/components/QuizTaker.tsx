@@ -51,7 +51,7 @@ export default function QuizTaker() {
    } else {
      loadQuizzes()
    }
- }, [quizId]) // Remove 'user' from dependency array
+ }, [quizId])
 
  // Add a separate effect for user changes if needed
  useEffect(() => {
@@ -353,7 +353,7 @@ export default function QuizTaker() {
          <h2 className="text-2xl font-bold text-red-800 mb-4">Access Required</h2>
          <p className="text-red-700 mb-6">{accessError}</p>
          <button
-           onClick={() => window.location.href = '/'}
+           onClick={() => router.push('/')}
            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
          >
            Return to Main Page
@@ -469,7 +469,7 @@ export default function QuizTaker() {
            {/* Action Buttons */}
            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center">
              <button
-               onClick={() => window.location.href = '/'}
+               onClick={() => router.push('/')}
                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
              >
                Return Home
@@ -547,7 +547,7 @@ export default function QuizTaker() {
              <p className="text-sm text-gray-600">Question {currentQuestionIndex + 1} of {questions.length}</p>
            </div>
            <button
-             onClick={() => window.location.href = '/'}
+             onClick={() => router.push('/')}
              className="bg-gray-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm sm:text-base whitespace-nowrap"
            >
              Return Home
