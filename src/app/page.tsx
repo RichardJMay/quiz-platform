@@ -7,6 +7,7 @@ import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '../contexts/AuthContext'
 import Image from 'next/image'
 import { ArrowRight } from 'lucide-react'
+import { supabasePublic } from '@/lib/supabase'
 
 interface Category {
   id: string
@@ -66,7 +67,7 @@ useEffect(() => {
   try {
     console.log('Making Supabase query...');
     
-    const { data, error } = await supabase
+    const { data, error } = await supabasePublic
       .from('quiz_categories')
       .select(`*`)
       .eq('is_active', true)
