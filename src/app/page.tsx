@@ -98,11 +98,7 @@ useEffect(() => {
   try {
     const { data, error } = await supabase
       .from('purchases')
-      .select(`
-        quiz_id,
-        purchased_at,
-        quizzes!inner(id, title, description)
-      `)
+      .select('quiz_id, purchased_at')
       .eq('user_id', user.id)
       .eq('status', 'completed')
       .order('purchased_at', { ascending: false })
@@ -114,9 +110,10 @@ useEffect(() => {
       console.error('Error loading purchased quizzes:', error)
       setPurchasedQuizzes([])
     } else {
+      // Map to match expected interface with null quizzes
       const typedData = (data || []).map(item => ({
         ...item,
-        quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes
+        quizzes: null // Since we're not fetching quiz details anymore
       }))
       setPurchasedQuizzes(typedData)
     }
