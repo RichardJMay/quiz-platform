@@ -63,16 +63,39 @@ useEffect(() => {
 }, [user?.id]);
 
   const loadCategories = async () => {
-  console.log('Skipping categories load for test');
-  setCategories([]);
-  setLoading(false);
-}
+  const ac = new AbortController();
+  const timeout = setTimeout(() => ac.abort('timeout'), 8000);
+
+  try {
+    const { data, error } = await supabasePublic
+      .from('quiz_categories')
+      .select('*')
+      .eq('is_active', true)
+      .order('display_order')
+      .abortSignal(ac.signal);
+
+    if (error) throw error;
+    setCategories(data ?? []);
+  } catch (e) {
+    setCategories([]);
+    console.error('Categories fetch failed:', e);
+  } finally {
+    clearTimeout(timeout);
+    setLoading(false);
+  }
+};
 
 
 
   const loadPurchasedQuizzes = async () => {
-    if (!user) return
+  if (!user) return
 
+  console.log('=== loadPurchasedQuizzes START ===');
+  
+  const ac = new AbortController();
+  const timeout = setTimeout(() => ac.abort('timeout'), 8000);
+
+  try {
     const { data, error } = await supabase
       .from('purchases')
       .select(`
@@ -83,17 +106,28 @@ useEffect(() => {
       .eq('user_id', user.id)
       .eq('status', 'completed')
       .order('purchased_at', { ascending: false })
+      .abortSignal(ac.signal);
+
+    console.log('Purchases response:', { data, error });
 
     if (error) {
       console.error('Error loading purchased quizzes:', error)
+      setPurchasedQuizzes([])
     } else {
       const typedData = (data || []).map(item => ({
         ...item,
         quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes
-      })) as PurchasedQuiz[]
+      }))
       setPurchasedQuizzes(typedData)
     }
+  } catch (err) {
+    console.error('Purchases fetch failed or timed out:', err);
+    setPurchasedQuizzes([])
+  } finally {
+    clearTimeout(timeout);
+    console.log('=== loadPurchasedQuizzes END ===');
   }
+}
 
   const handleCategoryClick = (categoryId: string, categoryName: string) => {
     router.push(`/category?id=${categoryId}&name=${encodeURIComponent(categoryName)}`)
