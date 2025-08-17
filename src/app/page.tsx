@@ -149,7 +149,7 @@ export default function LandingPage() {
     }
   }
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
         <div className="text-center">
@@ -349,7 +349,7 @@ export default function LandingPage() {
         )}
 
         {/* My Quizzes Section */}
-        {user && !authLoading && showMyQuizzes && (
+        {user && showMyQuizzes && (
           <div className="mb-12">
             <div className="text-center mb-8">
               <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Your Learning Dashboard</h2>
@@ -404,14 +404,6 @@ export default function LandingPage() {
                 Browse More optibl Categories
               </button>
             </div>
-          </div>
-        )}
-
-        {/* My Quizzes Loading State - Show when user is logged in but auth is still loading */}
-        {user && authLoading && showMyQuizzes && (
-          <div className="mb-12 text-center py-12">
-            <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-            <div className="text-xl text-gray-700 animate-pulse">Loading your quizzes...</div>
           </div>
         )}
 
