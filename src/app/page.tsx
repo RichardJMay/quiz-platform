@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import AuthModal from '@/components/auth/AuthModal'
@@ -37,28 +37,28 @@ export default function LandingPage() {
   const router = useRouter()
   const { user, signOut, loading: authLoading } = useAuth()
 
-  useEffect(() => {
-    console.log('Home page loaded, clearing payment state');
-    
-    // Wrap potentially failing operations in try/catch
-    try {
-      sessionStorage.clear();
-      localStorage.removeItem('stripe_payment_intent');
-      
-      // Clear any stuck Stripe iframes
-      const stripeIframes = document.querySelectorAll('iframe[name*="Stripe"]');
-      stripeIframes.forEach(iframe => iframe.remove());
-    } catch (error) {
-      console.log('Storage/DOM cleanup failed:', error);
-      // Don't let cleanup errors break the page loading
-    }
-    
-    // Always run these, even if cleanup failed
-    loadCategories()
-    if (user) {
-      loadPurchasedQuizzes()
-    }
-  }, [user])
+  const firstRun = useRef(false);
+
+useEffect(() => {
+  console.log('Home page loaded, clearing payment state');
+  
+  // Only clear specific keys, not all storage
+  try {
+    localStorage.removeItem('stripe_payment_intent');
+    sessionStorage.removeItem('stripe_payment_intent');
+  } catch (error) {
+    console.log('Storage cleanup failed:', error);
+  }
+
+  if (!firstRun.current) {
+    firstRun.current = true;
+    loadCategories();
+  }
+  
+  if (user) {
+    loadPurchasedQuizzes();
+  }
+}, [user?.id]);
 
   const loadCategories = async () => {
   console.log('=== loadCategories START ===', new Date().toISOString());
@@ -68,10 +68,7 @@ export default function LandingPage() {
     
     const { data, error } = await supabase
       .from('quiz_categories')
-      .select(`
-        *,
-        quizzes(count)
-      `)
+      .select(`*`)
       .eq('is_active', true)
       .order('display_order')
 
