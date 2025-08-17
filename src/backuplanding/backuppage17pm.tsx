@@ -61,11 +61,6 @@ export default function LandingPage() {
   }, [user])
 
   const loadCategories = async () => {
-  console.log('=== loadCategories START ===', new Date().toISOString());
-  
-  try {
-    console.log('Making Supabase query...');
-    
     const { data, error } = await supabase
       .from('quiz_categories')
       .select(`
@@ -75,23 +70,13 @@ export default function LandingPage() {
       .eq('is_active', true)
       .order('display_order')
 
-    console.log('Supabase response:', { data, error });
-
     if (error) {
-      console.error('Supabase error:', error)
-      setCategories([])
+      console.error('Error loading categories:', error)
     } else {
-      console.log('Setting categories:', data?.length || 0, 'items');
       setCategories(data || [])
     }
-  } catch (err) {
-    console.error('Unexpected error in loadCategories:', err);
-    setCategories([])
-  } finally {
-    console.log('=== loadCategories END - setting loading to false ===');
     setLoading(false)
   }
-}
 
   const loadPurchasedQuizzes = async () => {
     if (!user) return
