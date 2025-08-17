@@ -69,7 +69,10 @@ useEffect(() => {
   try {
     const { data, error } = await supabasePublic
       .from('quiz_categories')
-      .select('*')
+      .select(`
+        *,
+        quizzes(count)
+      `)
       .eq('is_active', true)
       .order('display_order')
       .abortSignal(ac.signal);
