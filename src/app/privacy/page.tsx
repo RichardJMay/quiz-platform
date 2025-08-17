@@ -1,25 +1,33 @@
-// src/app/privacy/page.tsx
+'use client'
+
+import { useRouter } from 'next/navigation'
+
 export default function PrivacyPolicy() {
+  const router = useRouter()
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header */}
       <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            <a href="/" className="flex items-center space-x-3">
+            <button 
+              onClick={() => router.push('/')}
+              className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
+            >
               <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold text-sm">Q</span>
               </div>
               <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
                 Dr May&apos;s Quiz Master Pro
               </h1>
-            </a>
-            <a 
-              href="/"
+            </button>
+            <button 
+              onClick={() => router.push('/')}
               className="text-blue-600 hover:text-blue-800 font-medium"
             >
               ← Back to Home
-            </a>
+            </button>
           </div>
         </div>
       </header>
@@ -151,7 +159,7 @@ export default function PrivacyPolicy() {
             <p className="text-gray-700 mb-4">For privacy-related questions or requests, contact:</p>
             <div className="bg-blue-50 p-4 rounded-lg mb-6">
               <p className="text-gray-700"><strong>Email:</strong> [YOUR EMAIL ADDRESS]</p>
-              <p className="text-gray-700"><strong>Website:</strong> <a href="https://richardjmay.github.io/" className="text-blue-600 hover:text-blue-800">https://richardjmay.github.io/</a></p>
+              <p className="text-gray-700"><strong>Website:</strong> <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">https://richardjmay.github.io/</a></p>
               <p className="text-gray-700"><strong>Address:</strong> [YOUR BUSINESS ADDRESS]</p>
             </div>
 

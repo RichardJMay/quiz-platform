@@ -1,9 +1,38 @@
+'use client'
+
+import { useRouter } from 'next/navigation'
 import { Brain, Target, Users, Award, BookOpen, CheckCircle } from 'lucide-react'
 
 export default function AboutPage() {
+  const router = useRouter()
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Your header component */}
+      {/* Header - matching other pages */}
+      <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <button 
+              onClick={() => router.push('/')}
+              className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
+            >
+              <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-sm">O</span>
+              </div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                optibl
+              </h1>
+            </button>
+            <button 
+              onClick={() => router.push('/')}
+              className="text-blue-600 hover:text-blue-800 font-medium"
+            >
+              ← Back to Home
+            </button>
+          </div>
+        </div>
+      </header>
+      
       <div className="max-w-4xl mx-auto px-4 py-16">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-900 mb-4">The Science Behind optibl</h1>
@@ -145,12 +174,12 @@ export default function AboutPage() {
             <p className="text-blue-100 mb-4">
               Ready to experience learning that's designed around how your brain actually works?
             </p>
-            <a 
-              href="/"
-              className="inline-block bg-white text-blue-600 px-8 py-3 rounded-lg font-semibold hover:bg-blue-50 transition-colors"
+            <button 
+              onClick={() => router.push('/')}
+              className="inline-block bg-white text-blue-600 px-8 py-3 rounded-lg font-semibold hover:bg-blue-50 transition-colors cursor-pointer"
             >
               Start your personalized pathway to BCBA success
-            </a>
+            </button>
           </div>
 
         </div>
