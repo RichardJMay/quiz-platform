@@ -42,6 +42,7 @@ export default function LandingPage() {
 
   const firstRun = useRef(false);
   const fetchedOnce = useRef(false)
+  const loadPurchasedQuizzesRef = useRef(false); // ADD THIS LINE
 
 useEffect(() => {
   console.log('Home page loaded, clearing payment state');
@@ -94,51 +95,46 @@ useEffect(() => {
 
   // In your landing page loadPurchasedQuizzes
 const loadPurchasedQuizzes = async () => {
-  if (!user) return
-
-  console.log('=== loadPurchasedQuizzes START ===');
-  
-  try {
-    let { data, error } = await supabase
-      .from('purchases')
-      .select('quiz_id, purchased_at')
-      .eq('user_id', user.id)
-      .eq('status', 'completed')
-      .order('purchased_at', { ascending: false })
-
-    // Simple retry on auth error
-    if (error?.code === 'PGRST301' || error?.message?.includes('JWT')) {
-      console.log('Auth error detected, retrying...')
-      await supabase.auth.refreshSession()
-      // Retry once
-      const retry = await supabase
-        .from('purchases')
-        .select('quiz_id, purchased_at')
-        .eq('user_id', user.id)
-        .eq('status', 'completed')
-        .order('purchased_at', { ascending: false })
-      
-      data = retry.data
-      error = retry.error
+    if (!user || loadPurchasedQuizzesRef.current) {
+      if (loadPurchasedQuizzesRef.current) {
+        console.log('=== loadPurchasedQuizzes ALREADY RUNNING - SKIPPING ===');
+      }
+      return;
     }
+    
+    loadPurchasedQuizzesRef.current = true;
+    console.log('=== loadPurchasedQuizzes START ===');
 
-    if (error) {
-      console.error('Error loading purchased quizzes:', error)
+    try {
+      const result = await executeAuthQuery(async () => {
+        return await supabase
+          .from('purchases')
+          .select('quiz_id, purchased_at')
+          .eq('user_id', user.id)
+          .eq('status', 'completed')
+          .order('purchased_at', { ascending: false })
+      }, { maxRetries: 3, retryDelay: 1000 })
+
+      console.log('Purchases response:', result);
+
+      if (result.error) {
+        console.error('Error loading purchased quizzes:', result.error)
+        setPurchasedQuizzes([])
+      } else {
+        const typedData = (result.data || []).map((item: { quiz_id: string; purchased_at: string }) => ({
+          ...item,
+          quizzes: null
+        }))
+        setPurchasedQuizzes(typedData)
+      }
+    } catch (err) {
+      console.error('Purchases fetch failed after retries:', err);
       setPurchasedQuizzes([])
-    } else {
-      const typedData = (data || []).map((item: { quiz_id: string; purchased_at: string }) => ({
-        ...item,
-        quizzes: null
-      }))
-      setPurchasedQuizzes(typedData)
+    } finally {
+      loadPurchasedQuizzesRef.current = false;
+      console.log('=== loadPurchasedQuizzes END ===');
     }
-  } catch (err) {
-    console.error('Purchases fetch failed:', err);
-    setPurchasedQuizzes([])
-  } finally {
-    console.log('=== loadPurchasedQuizzes END ===');
   }
-}
 
   const handleCategoryClick = (categoryId: string, categoryName: string) => {
     router.push(`/category?id=${categoryId}&name=${encodeURIComponent(categoryName)}`)
