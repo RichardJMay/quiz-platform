@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -44,6 +44,8 @@ export default function QuizTaker() {
  const [startTime, setStartTime] = useState<Date | null>(null)
  const [accessError, setAccessError] = useState<string | null>(null)
  const [checkingAccess, setCheckingAccess] = useState(false)
+ const checkingAccessPromise = useRef<Promise<boolean> | null>(null)
+
 
  // Load available quizzes or specific quiz
  useEffect(() => {
@@ -128,93 +130,112 @@ export default function QuizTaker() {
  }
 
 const checkQuizAccess = async (quizId: string): Promise<boolean> => {
-  console.log('Checking quiz access for:', { userId: user?.id, userEmail: user?.email, quizId })
-  
-  // Check for authenticated user purchase
-  if (user) {
-    // Check by user_id with retry logic
-    const userResult = await executeAuthQuery(async () => {
-      return await supabase
-        .from('purchases')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('quiz_id', quizId)
-        .eq('status', 'completed')
-        .single()
-    })
-
-    console.log('User purchase check:', { userPurchase: userResult.data, userError: userResult.error })
-
-    if (userResult.data) {
-      console.log('User has purchased this quiz via user_id')
-      return true
+    // If already checking, wait for that check to complete
+    if (checkingAccessPromise.current) {
+      console.log('Quiz access check already in progress, waiting...')
+      return await checkingAccessPromise.current
     }
-
-    // Check email-based purchases with retry logic
-    const emailResult = await executeAuthQuery(async () => {
-      return await supabase
-        .from('purchases')
-        .select('id')
-        .eq('user_email', user.email)
-        .eq('quiz_id', quizId)
-        .eq('status', 'completed')
-        .single()
-    })
-
-    console.log('Email purchase check:', { emailPurchase: emailResult.data, emailError: emailResult.error })
-
-    if (emailResult.data) {
-      console.log('User has email-based purchase for this quiz')
-      return true
-    }
-  }
-
-  // Check for session-based access (keep as is - no Supabase query)
-  const sessionId = searchParams.get('session_id')
-  if (sessionId) {
-    console.log('Checking session access for:', sessionId)
     
-    try {
-      const response = await fetch('/api/verify-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId }),
-      })
+    // Create new promise for this check
+    checkingAccessPromise.current = (async () => {
+      console.log('Checking quiz access for:', { userId: user?.id, userEmail: user?.email, quizId })
+      
+      try {
+        // Check for authenticated user purchase
+        if (user) {
+          // Check by user_id with retry logic
+          const userResult = await executeAuthQuery(async () => {
+            return await supabase
+              .from('purchases')
+              .select('id')
+              .eq('user_id', user.id)
+              .eq('quiz_id', quizId)
+              .eq('status', 'completed')
+              .single()
+          })
 
-      if (response.ok) {
-        const data = await response.json()
-        console.log('Session verification result:', data)
-        if (data.quizId === quizId) {
-          console.log('Session provides access to this quiz')
-          return true
+          console.log('User purchase check:', { userPurchase: userResult.data, userError: userResult.error })
+
+          if (userResult.data) {
+            console.log('User has purchased this quiz via user_id')
+            return true
+          }
+
+          // Check email-based purchases with retry logic
+          const emailResult = await executeAuthQuery(async () => {
+            return await supabase
+              .from('purchases')
+              .select('id')
+              .eq('user_email', user.email)
+              .eq('quiz_id', quizId)
+              .eq('status', 'completed')
+              .single()
+          })
+
+          console.log('Email purchase check:', { emailPurchase: emailResult.data, emailError: emailResult.error })
+
+          if (emailResult.data) {
+            console.log('User has email-based purchase for this quiz')
+            return true
+          }
         }
+
+        // Check for session-based access (from payment success)
+        const sessionId = searchParams.get('session_id')
+        if (sessionId) {
+          console.log('Checking session access for:', sessionId)
+          
+          try {
+            const response = await fetch('/api/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId }),
+            })
+
+            if (response.ok) {
+              const data = await response.json()
+              console.log('Session verification result:', data)
+              if (data.quizId === quizId) {
+                console.log('Session provides access to this quiz')
+                return true
+              }
+            }
+          } catch (error) {
+            console.error('Error verifying payment session:', error)
+          }
+        }
+
+        // Check for token-based access with retry logic
+        const token = searchParams.get('token')
+        if (token) {
+          const tokenResult = await executeAuthQuery(async () => {
+            return await supabase
+              .from('quiz_access_tokens')
+              .select('quiz_id, expires_at')
+              .eq('token', token)
+              .eq('quiz_id', quizId)
+              .single()
+          })
+
+          if (tokenResult.data && new Date(tokenResult.data.expires_at) > new Date()) {
+            console.log('Valid token provides access')
+            return true
+          }
+        }
+
+        console.log('No valid access found for quiz')
+        return false
+        
+      } finally {
+        // Clear the promise after a short delay to allow duplicate calls to resolve
+        setTimeout(() => {
+          checkingAccessPromise.current = null
+        }, 100)
       }
-    } catch (error) {
-      console.error('Error verifying payment session:', error)
-    }
+    })()
+    
+    return await checkingAccessPromise.current
   }
-
-  // Check for token-based access with retry logic
-  const token = searchParams.get('token')
-  if (token) {
-    const tokenResult = await executeAuthQuery(async () => {
-      return await supabase
-        .from('quiz_access_tokens')
-        .select('quiz_id, expires_at')
-        .eq('token', token)
-        .eq('quiz_id', quizId)
-        .single()
-    })
-
-    if (tokenResult.data && new Date(tokenResult.data.expires_at) > new Date()) {
-      console.log('Valid token provides access')
-      return true
-    }
-  }
-
-  console.log('No valid access found for quiz')
-  return false
-}
 
  const startQuiz = async (quiz: Quiz) => {
    // Auto-generate student name from user info or use default

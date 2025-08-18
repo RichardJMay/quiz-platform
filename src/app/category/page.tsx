@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import PaymentButton from '@/components/payment/PaymentButton'
@@ -44,6 +44,7 @@ function CategoryPageContent() {
   
   const categoryId = searchParams.get('id')
   const categoryName = searchParams.get('name')
+  const navigatingRef = useRef(false)
 
   useEffect(() => {
     if (categoryId) {
@@ -101,8 +102,21 @@ function CategoryPageContent() {
   }
 
   const startQuiz = (quizId: string) => {
-    router.push(`/quiz?id=${quizId}`)
+  if (navigatingRef.current) {
+    console.log('Already navigating to quiz, ignoring...')
+    return
   }
+  
+  navigatingRef.current = true
+  console.log('Navigating to quiz:', quizId)
+  
+  router.push(`/quiz?id=${quizId}`)
+  
+  // Reset after navigation completes
+  setTimeout(() => {
+    navigatingRef.current = false
+  }, 2000)
+}
 
   const handleAuthModalOpen = (mode: 'login' | 'register' | 'reset') => {
     setAuthMode(mode)

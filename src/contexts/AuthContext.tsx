@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react'
 import { User, Session, AuthError } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
@@ -33,22 +33,24 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Track the last logical user id we emitted to avoid duplicate updates
+  const lastUserIdRef = useRef<string | null>(null)
+
+  // Track which user id we've already run linkExistingPurchases for
+  const purchasesLinkedForUserIdRef = useRef<string | null>(null)
+
   useEffect(() => {
     let mounted = true
 
-    // Get initial session
-    const getSession = async () => {
+    const init = async () => {
       try {
         const { data: { session }, error } = await supabase.auth.getSession()
-        
         if (!mounted) return
-        
-        if (error) {
-          console.error('Error getting session:', error)
-        } else {
-          setSession(session)
-          setUser(session?.user ?? null)
-        }
+        if (error) console.error('Error getting session:', error)
+
+        setSession(session ?? null)
+        setUser(session?.user ?? null)
+        lastUserIdRef.current = session?.user?.id ?? null
         setLoading(false)
       } catch (error) {
         console.error('Error in getSession:', error)
@@ -56,21 +58,45 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     }
 
-    getSession()
+    init()
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event, nextSession) => {
         if (!mounted) return
-        
-        console.log('Auth state changed:', event, session?.user?.email)
-        setSession(session)
-        setUser(session?.user ?? null)
+
+        const nextId = nextSession?.user?.id ?? null
+
+        // If Supabase replays SIGNED_IN for the same user (tab focus/refresh), don't swap the user object
+        if (event === 'SIGNED_IN' && nextId && nextId === lastUserIdRef.current) {
+          console.log('[auth] duplicate SIGNED_IN for same user — ignoring user update')
+          setSession(nextSession ?? null) // keep session fresh
+          // (do NOT call setUser)
+          return
+        }
+
+        // Token refresh should not rebuild the user object
+        if (event === 'TOKEN_REFRESHED') {
+          setSession(nextSession ?? null)
+          return
+        }
+
+        // For true transitions (SIGNED_IN with new id, SIGNED_OUT, etc.)
+        lastUserIdRef.current = nextId
+        setSession(nextSession ?? null)
+        setUser(nextSession?.user ?? null)
         setLoading(false)
 
-        // If user just signed in, try to link any existing purchases by email
-        if (event === 'SIGNED_IN' && session?.user) {
-          await linkExistingPurchases(session.user)
+        // Only try to link purchases once per user id
+        if (event === 'SIGNED_IN' && nextSession?.user) {
+          if (purchasesLinkedForUserIdRef.current !== nextSession.user.id) {
+            await linkExistingPurchases(nextSession.user)
+            purchasesLinkedForUserIdRef.current = nextSession.user.id
+          }
+        }
+
+        // On SIGNED_OUT, clear the marker
+        if (event === 'SIGNED_OUT') {
+          purchasesLinkedForUserIdRef.current = null
         }
       }
     )
@@ -81,64 +107,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, [])
 
-  // Handle tab visibility changes - refresh session when tab becomes active
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user) {
-        console.log('Tab became visible, refreshing session...')
-        // Force a session refresh when tab becomes active
-        supabase.auth.getSession().then(({ data: { session }, error }) => {
-          if (error) {
-            console.error('Error refreshing session on visibility change:', error)
-          } else if (session) {
-            console.log('Session refreshed after tab focus')
-            setSession(session)
-            setUser(session.user)
-          } else {
-            console.log('No session found after tab focus')
-          }
-        })
-      }
-    }
-
-    const handleFocus = () => {
-      if (user) {
-        console.log('Window focused, checking session...')
-        supabase.auth.getSession().then(({ data: { session }, error }) => {
-          if (!error && session) {
-            setSession(session)
-            setUser(session.user)
-          }
-        })
-      }
-    }
-
-    // Listen for visibility changes
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', handleFocus)
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleFocus)
-    }
-  }, [user])
-
-  // Simple keepalive to prevent token expiry during idle periods
+  // Keepalive — optional but harmless
   useEffect(() => {
     if (!user) return
-
-    // Keepalive - refresh session every 10 minutes
     const interval = setInterval(async () => {
-      console.log('Keepalive: Checking session...')
       const { data: { session }, error } = await supabase.auth.getSession()
-      
       if (error) {
         console.error('Keepalive error:', error)
       } else {
-        console.log('Keepalive: Session is', session ? 'active' : 'inactive')
+        console.log('Keepalive: session', session ? 'active' : 'inactive')
       }
-    }, 10 * 60 * 1000) // Every 10 minutes
-
+    }, 10 * 60 * 1000)
     return () => clearInterval(interval)
   }, [user])
 
@@ -165,24 +144,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: {
-          full_name: fullName || ''
-        }
-      }
+      options: { data: { full_name: fullName || '' } }
     })
     return { user: data.user, error }
   }
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     return { user: data.user, error }
   }
 
   const signOut = async () => {
+    purchasesLinkedForUserIdRef.current = null
     const { error } = await supabase.auth.signOut()
     return { error }
   }

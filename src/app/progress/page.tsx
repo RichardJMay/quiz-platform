@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
@@ -28,6 +28,8 @@ export default function ProgressPage() {
   const [showGraph, setShowGraph] = useState(false)
   const { user } = useAuth()
   const router = useRouter()
+  const loadingRef = useRef(false)
+
 
   useEffect(() => {
     if (!user) {
@@ -38,42 +40,49 @@ export default function ProgressPage() {
   }, [user])
 
   const loadAttempts = async () => {
-    if (!user) return
-
-    try {
-      const { data, error } = await supabase
-        .from('quiz_attempts')
-        .select(`
-          id,
-          quiz_id,
-          student_name,
-          total_questions,
-          correct_answers,
-          accuracy_percentage,
-          fluency_rate,
-          total_time_minutes,
-          completed_at,
-          quizzes!inner(title, description)
-        `)
-        .eq('user_id', user.id)
-        .order('completed_at', { ascending: false })
-
-      if (error) {
-        console.error('Error loading attempts:', error)
-      } else {
-        // Handle the data structure properly
-        const typedData = (data || []).map(item => ({
-          ...item,
-          quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes
-        })) as QuizAttempt[]
-        setAttempts(typedData)
-      }
-    } catch (error) {
-      console.error('Error in loadAttempts:', error)
-    } finally {
-      setLoading(false)
-    }
+  if (!user) return
+  
+  if (loadingRef.current) {
+    console.log('Progress data already loading, skipping...')
+    return
   }
+  
+  loadingRef.current = true
+
+  try {
+    const { data, error } = await supabase
+      .from('quiz_attempts')
+      .select(`
+        id,
+        quiz_id,
+        student_name,
+        total_questions,
+        correct_answers,
+        accuracy_percentage,
+        fluency_rate,
+        total_time_minutes,
+        completed_at,
+        quizzes!inner(title, description)
+      `)
+      .eq('user_id', user.id)
+      .order('completed_at', { ascending: false })
+
+    if (error) {
+      console.error('Error loading attempts:', error)
+    } else {
+      const typedData = (data || []).map(item => ({
+        ...item,
+        quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes
+      })) as QuizAttempt[]
+      setAttempts(typedData)
+    }
+  } catch (error) {
+    console.error('Error in loadAttempts:', error)
+  } finally {
+    setLoading(false)
+    loadingRef.current = false
+  }
+}
 
   const getUniqueQuizzes = () => {
     const quizMap = new Map()

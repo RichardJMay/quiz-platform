@@ -44,10 +44,16 @@ export default function LandingPage() {
   const fetchedOnce = useRef(false)
   const loadPurchasedQuizzesRef = useRef(false); // ADD THIS LINE
 
+// In your landing page component, modify the useEffect that loads data:
 useEffect(() => {
+  // Only run if we're actually on the home page route
+  if (window.location.pathname !== '/') {
+    console.log('Not on home page, skipping data load')
+    return
+  }
+  
   console.log('Home page loaded, clearing payment state');
   
-  // Only clear specific keys, not all storage
   try {
     localStorage.removeItem('stripe_payment_intent');
     sessionStorage.removeItem('stripe_payment_intent');
