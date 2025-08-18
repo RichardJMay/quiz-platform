@@ -81,6 +81,48 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, [])
 
+  // Handle tab visibility changes - refresh session when tab becomes active
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        console.log('Tab became visible, refreshing session...')
+        // Force a session refresh when tab becomes active
+        supabase.auth.getSession().then(({ data: { session }, error }) => {
+          if (error) {
+            console.error('Error refreshing session on visibility change:', error)
+          } else if (session) {
+            console.log('Session refreshed after tab focus')
+            setSession(session)
+            setUser(session.user)
+          } else {
+            console.log('No session found after tab focus')
+          }
+        })
+      }
+    }
+
+    const handleFocus = () => {
+      if (user) {
+        console.log('Window focused, checking session...')
+        supabase.auth.getSession().then(({ data: { session }, error }) => {
+          if (!error && session) {
+            setSession(session)
+            setUser(session.user)
+          }
+        })
+      }
+    }
+
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [user])
+
   // Simple keepalive to prevent token expiry during idle periods
   useEffect(() => {
     if (!user) return
