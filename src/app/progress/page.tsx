@@ -35,11 +35,11 @@ export default function ProgressPage() {
       return
     }
     loadAttempts()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   const loadAttempts = async () => {
     if (!user) return
+
     try {
       const { data, error } = await supabase
         .from('quiz_attempts')
@@ -61,7 +61,8 @@ export default function ProgressPage() {
       if (error) {
         console.error('Error loading attempts:', error)
       } else {
-        const typedData = (data || []).map((item: any) => ({
+        // Handle the data structure properly
+        const typedData = (data || []).map(item => ({
           ...item,
           quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes
         })) as QuizAttempt[]
@@ -74,9 +75,9 @@ export default function ProgressPage() {
     }
   }
 
-  const getUniqueQuizzes = (): Array<[string, string]> => {
-    const quizMap = new Map<string, string>()
-    attempts.forEach((attempt: QuizAttempt) => {
+  const getUniqueQuizzes = () => {
+    const quizMap = new Map()
+    attempts.forEach(attempt => {
       if (attempt.quizzes && !quizMap.has(attempt.quiz_id)) {
         quizMap.set(attempt.quiz_id, attempt.quizzes.title)
       }
@@ -84,9 +85,9 @@ export default function ProgressPage() {
     return Array.from(quizMap.entries())
   }
 
-  const filteredAttempts: QuizAttempt[] = selectedQuiz === 'all'
-    ? attempts
-    : attempts.filter((attempt: QuizAttempt) => attempt.quiz_id === selectedQuiz)
+  const filteredAttempts = selectedQuiz === 'all' 
+    ? attempts 
+    : attempts.filter(attempt => attempt.quiz_id === selectedQuiz)
 
   const getPerformanceColor = (accuracy: number, fluency: number) => {
     if (accuracy >= 80 && fluency >= 30) return 'text-green-600 bg-green-50'
@@ -96,15 +97,16 @@ export default function ProgressPage() {
 
   const getOverallStats = () => {
     if (filteredAttempts.length === 0) return null
-
-    const avgAccuracy = filteredAttempts.reduce((sum: number, a: QuizAttempt) => sum + a.accuracy_percentage, 0) / filteredAttempts.length
-    const avgFluency = filteredAttempts.reduce((sum: number, a: QuizAttempt) => sum + a.fluency_rate, 0) / filteredAttempts.length
+    
+    const avgAccuracy = filteredAttempts.reduce((sum, a) => sum + a.accuracy_percentage, 0) / filteredAttempts.length
+    const avgFluency = filteredAttempts.reduce((sum, a) => sum + a.fluency_rate, 0) / filteredAttempts.length
     const totalAttempts = filteredAttempts.length
-    const bestAccuracy = Math.max(...filteredAttempts.map((a: QuizAttempt) => a.accuracy_percentage))
-    const bestFluency = Math.max(...filteredAttempts.map((a: QuizAttempt) => a.fluency_rate))
+    const bestAccuracy = Math.max(...filteredAttempts.map(a => a.accuracy_percentage))
+    const bestFluency = Math.max(...filteredAttempts.map(a => a.fluency_rate))
 
-    const firstAttempt = filteredAttempts[filteredAttempts.length - 1]
-    const lastAttempt = filteredAttempts[0]
+    // Calculate improvement (comparing first vs last attempt)
+    const firstAttempt = filteredAttempts[filteredAttempts.length - 1] // oldest
+    const lastAttempt = filteredAttempts[0] // newest
     const accuracyImprovement = totalAttempts > 1 ? lastAttempt.accuracy_percentage - firstAttempt.accuracy_percentage : 0
     const fluencyImprovement = totalAttempts > 1 ? lastAttempt.fluency_rate - firstAttempt.fluency_rate : 0
 
@@ -114,8 +116,8 @@ export default function ProgressPage() {
   const getProgressChartData = () => {
     return filteredAttempts
       .slice()
-      .reverse()
-      .map((attempt: QuizAttempt, index: number) => ({
+      .reverse() // Show chronological order
+      .map((attempt, index) => ({
         attempt: index + 1,
         fluency: attempt.fluency_rate,
         accuracy: attempt.accuracy_percentage,
@@ -233,6 +235,7 @@ export default function ProgressPage() {
                   </div>
                 </div>
 
+                {/* Progress Graph */}
                 {filteredAttempts.length > 1 && selectedQuiz !== 'all' && (
                   <div className="mb-8 bg-white rounded-lg shadow p-6">
                     <div className="flex justify-between items-center mb-4">
@@ -244,11 +247,214 @@ export default function ProgressPage() {
                         {showGraph ? 'Hide Graph' : 'Show Graph'}
                       </button>
                     </div>
-
+                    
                     {showGraph && (
                       <div className="mt-4">
-                        {/* SVG chart unchanged */}
-                        {/* (left as-is from your code) */}
+                        <svg width="100%" height="400" viewBox="0 0 900 400" className="bg-white">
+                          {(() => {
+                            const chartData = getProgressChartData()
+                            const maxFluency = Math.max(...chartData.map(d => d.fluency), 60)
+                            const minFluency = Math.min(...chartData.map(d => d.fluency), 0)
+                            const fluencyRange = maxFluency - minFluency
+                            const chartHeight = 280
+                            const chartWidth = 700
+                            const startX = 100
+                            const startY = 50
+                            
+                            const xStep = chartWidth / Math.max(chartData.length - 1, 1)
+                            const yScale = chartHeight / fluencyRange
+                            
+                            return (
+                              <g>
+                                {/* Chart background */}
+                                <rect 
+                                  x={startX} 
+                                  y={startY} 
+                                  width={chartWidth} 
+                                  height={chartHeight} 
+                                  fill="white" 
+                                  stroke="#000000" 
+                                  strokeWidth="2"
+                                />
+                                
+                                {/* Y-axis grid lines and labels */}
+                                {[0, 10, 20, 30, 40, 50, 60].map(rate => {
+                                  if (rate <= maxFluency && rate >= minFluency) {
+                                    const y = startY + chartHeight - ((rate - minFluency) * yScale)
+                                    return (
+                                      <g key={rate}>
+                                        <line 
+                                          x1={startX} 
+                                          y1={y} 
+                                          x2={startX + chartWidth} 
+                                          y2={y} 
+                                          stroke="#e0e0e0" 
+                                          strokeWidth="1"
+                                        />
+                                        <text 
+                                          x={startX - 10} 
+                                          y={y + 4} 
+                                          textAnchor="end" 
+                                          fontSize="12" 
+                                          fill="#333333"
+                                          fontFamily="Arial, sans-serif"
+                                        >
+                                          {rate}
+                                        </text>
+                                      </g>
+                                    )
+                                  }
+                                  return null
+                                })}
+                                
+                                {/* X-axis grid lines and labels */}
+                                {chartData.map((d, i) => {
+                                  const x = startX + (i * xStep)
+                                  return (
+                                    <g key={i}>
+                                      <line 
+                                        x1={x} 
+                                        y1={startY} 
+                                        x2={x} 
+                                        y2={startY + chartHeight} 
+                                        stroke="#e0e0e0" 
+                                        strokeWidth="1"
+                                      />
+                                      <text 
+                                        x={x} 
+                                        y={startY + chartHeight + 20} 
+                                        textAnchor="middle" 
+                                        fontSize="12" 
+                                        fill="#333333"
+                                        fontFamily="Arial, sans-serif"
+                                      >
+                                        {i + 1}
+                                      </text>
+                                    </g>
+                                  )
+                                })}
+                                
+                                {/* Target line at 30 fluency (if within range) */}
+                                {30 >= minFluency && 30 <= maxFluency && (
+                                  <g>
+                                    <line 
+                                      x1={startX} 
+                                      y1={startY + chartHeight - ((30 - minFluency) * yScale)} 
+                                      x2={startX + chartWidth} 
+                                      y2={startY + chartHeight - ((30 - minFluency) * yScale)} 
+                                      stroke="#000000" 
+                                      strokeWidth="2" 
+                                      strokeDasharray="8,4"
+                                    />
+                                    <text 
+                                      x={startX + chartWidth + 10} 
+                                      y={startY + chartHeight - ((30 - minFluency) * yScale) + 4} 
+                                      fontSize="12" 
+                                      fill="#000000"
+                                      fontFamily="Arial, sans-serif"
+                                      fontWeight="bold"
+                                    >
+                                      Target (30)
+                                    </text>
+                                  </g>
+                                )}
+                                
+                                {/* Fluency line */}
+                                <polyline
+                                  fill="none"
+                                  stroke="#000000"
+                                  strokeWidth="3"
+                                  points={chartData.map((d, i) => 
+                                    `${startX + (i * xStep)},${startY + chartHeight - ((d.fluency - minFluency) * yScale)}`
+                                  ).join(' ')}
+                                />
+                                
+                                {/* Data points */}
+                                {chartData.map((d, i) => (
+                                  <g key={i}>
+                                    <circle 
+                                      cx={startX + (i * xStep)} 
+                                      cy={startY + chartHeight - ((d.fluency - minFluency) * yScale)} 
+                                      r="5" 
+                                      fill="#000000"
+                                      stroke="#ffffff"
+                                      strokeWidth="2"
+                                    />
+                                    {/* Data labels on hover */}
+                                    <text 
+                                      x={startX + (i * xStep)} 
+                                      y={startY + chartHeight - ((d.fluency - minFluency) * yScale) - 15} 
+                                      textAnchor="middle" 
+                                      fontSize="10" 
+                                      fill="#333333"
+                                      fontFamily="Arial, sans-serif"
+                                      className="opacity-0 hover:opacity-100 transition-opacity"
+                                    >
+                                      {d.fluency.toFixed(1)}
+                                    </text>
+                                  </g>
+                                ))}
+                                
+                                {/* Axis labels */}
+                                <text 
+                                  x={startX + chartWidth / 2} 
+                                  y={startY + chartHeight + 50} 
+                                  textAnchor="middle" 
+                                  fontSize="14" 
+                                  fill="#000000"
+                                  fontFamily="Arial, sans-serif"
+                                  fontWeight="bold"
+                                >
+                                  Session Number
+                                </text>
+                                
+                                <text 
+                                  x={30} 
+                                  y={startY + chartHeight / 2} 
+                                  textAnchor="middle" 
+                                  fontSize="14" 
+                                  fill="#000000"
+                                  fontFamily="Arial, sans-serif"
+                                  fontWeight="bold"
+                                  transform={`rotate(-90, 30, ${startY + chartHeight / 2})`}
+                                >
+                                  Fluency Rate (correct/min)
+                                </text>
+                                
+                                {/* Chart title */}
+                                <text 
+                                  x={startX + chartWidth / 2} 
+                                  y={30} 
+                                  textAnchor="middle" 
+                                  fontSize="16" 
+                                  fill="#000000"
+                                  fontFamily="Arial, sans-serif"
+                                  fontWeight="bold"
+                                >
+                                  Fluency Progress Over Time
+                                </text>
+                                
+                                {/* Major axis lines */}
+                                <line 
+                                  x1={startX} 
+                                  y1={startY} 
+                                  x2={startX} 
+                                  y2={startY + chartHeight} 
+                                  stroke="#000000" 
+                                  strokeWidth="3"
+                                />
+                                <line 
+                                  x1={startX} 
+                                  y1={startY + chartHeight} 
+                                  x2={startX + chartWidth} 
+                                  y2={startY + chartHeight} 
+                                  stroke="#000000" 
+                                  strokeWidth="3"
+                                />
+                              </g>
+                            )
+                          })()}
+                        </svg>
                       </div>
                     )}
                   </div>
@@ -256,8 +462,9 @@ export default function ProgressPage() {
               </>
             )}
 
+            {/* Attempts List */}
             <div className="space-y-4">
-              {filteredAttempts.map((attempt: QuizAttempt) => (
+              {filteredAttempts.map((attempt) => (
                 <div key={attempt.id} className="bg-white rounded-lg shadow p-4 sm:p-6">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
                     <div>
@@ -303,7 +510,6 @@ export default function ProgressPage() {
                 </div>
               ))}
             </div>
-
           </>
         )}
       </div>
