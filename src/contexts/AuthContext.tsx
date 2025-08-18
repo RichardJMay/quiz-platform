@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
-import { User, Session, AuthError } from '@supabase/supabase-js'
+import type { User, Session, AuthError, AuthChangeEvent } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
 interface AuthContextType {
@@ -36,18 +36,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   useEffect(() => {
     let mounted = true
 
-    // Get initial session
     const getSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession()
-        
+        const { data, error }: { data: { session: Session | null }, error: AuthError | null } =
+          await supabase.auth.getSession()
+
         if (!mounted) return
-        
+
         if (error) {
           console.error('Error getting session:', error)
         } else {
-          setSession(session)
-          setUser(session?.user ?? null)
+          setSession(data.session)
+          setUser(data.session?.user ?? null)
         }
         setLoading(false)
       } catch (error) {
@@ -58,17 +58,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
     getSession()
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event: AuthChangeEvent, session: Session | null) => {
         if (!mounted) return
-        
+
         console.log('Auth state changed:', event, session?.user?.email)
         setSession(session)
         setUser(session?.user ?? null)
         setLoading(false)
 
-        // If user just signed in, try to link any existing purchases by email
         if (event === 'SIGNED_IN' && session?.user) {
           await linkExistingPurchases(session.user)
         }
@@ -81,19 +79,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, [])
 
-  // Handle tab visibility changes - refresh session when tab becomes active
+  // Handle tab visibility / focus to refresh view of session
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && user) {
         console.log('Tab became visible, refreshing session...')
-        // Force a session refresh when tab becomes active
-        supabase.auth.getSession().then(({ data: { session }, error }) => {
+        supabase.auth.getSession().then(({ data, error }: { data: { session: Session | null }, error: AuthError | null }) => {
           if (error) {
             console.error('Error refreshing session on visibility change:', error)
-          } else if (session) {
+          } else if (data.session) {
             console.log('Session refreshed after tab focus')
-            setSession(session)
-            setUser(session.user)
+            setSession(data.session)
+            setUser(data.session.user)
           } else {
             console.log('No session found after tab focus')
           }
@@ -104,16 +101,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const handleFocus = () => {
       if (user) {
         console.log('Window focused, checking session...')
-        supabase.auth.getSession().then(({ data: { session }, error }) => {
-          if (!error && session) {
-            setSession(session)
-            setUser(session.user)
+        supabase.auth.getSession().then(({ data, error }: { data: { session: Session | null }, error: AuthError | null }) => {
+          if (!error && data.session) {
+            setSession(data.session)
+            setUser(data.session.user)
           }
         })
       }
     }
 
-    // Listen for visibility changes
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('focus', handleFocus)
 
@@ -123,26 +119,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, [user])
 
-  // Simple keepalive to prevent token expiry during idle periods
+  // Keepalive
   useEffect(() => {
     if (!user) return
-
-    // Keepalive - refresh session every 10 minutes
     const interval = setInterval(async () => {
       console.log('Keepalive: Checking session...')
-      const { data: { session }, error } = await supabase.auth.getSession()
-      
-      if (error) {
-        console.error('Keepalive error:', error)
-      } else {
-        console.log('Keepalive: Session is', session ? 'active' : 'inactive')
-      }
-    }, 10 * 60 * 1000) // Every 10 minutes
-
+      const { data, error }: { data: { session: Session | null }, error: AuthError | null } =
+        await supabase.auth.getSession()
+      if (error) console.error('Keepalive error:', error)
+      else console.log('Keepalive: Session is', data.session ? 'active' : 'inactive')
+    }, 10 * 60 * 1000)
     return () => clearInterval(interval)
   }, [user])
 
-  // Link existing purchases made with email to the newly authenticated user
   const linkExistingPurchases = async (user: User) => {
     try {
       const { error } = await supabase
@@ -166,19 +155,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       email,
       password,
       options: {
-        data: {
-          full_name: fullName || ''
-        }
+        data: { full_name: fullName || '' }
       }
     })
     return { user: data.user, error }
   }
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     return { user: data.user, error }
   }
 
@@ -194,15 +178,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return { error }
   }
 
-  const value = {
-    user,
-    session,
-    loading,
-    signUp,
-    signIn,
-    signOut,
-    resetPassword,
-  }
-
+  const value = { user, session, loading, signUp, signIn, signOut, resetPassword }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
