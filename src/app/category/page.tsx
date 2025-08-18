@@ -379,35 +379,35 @@ function CategoryPageContent() {
               />
               <span className="text-gray-600">© 2025 optibl</span>
             </div>
-            
-            <div className="flex space-x-6 text-sm">
-              <a 
-                href="/about" 
-                className="text-gray-600 hover:text-blue-600 transition-colors"
-              >
-                About optibl
-              </a>
-              <a 
-                href="/privacy" 
-                className="text-gray-600 hover:text-blue-600 transition-colors"
-              >
-                Privacy Policy
-              </a>
-              <a 
-                href="/terms" 
-                className="text-gray-600 hover:text-blue-600 transition-colors"
-              >
-                Terms of Service
-              </a>
-              <a 
-                href="https://richardjmay.github.io/" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-gray-600 hover:text-blue-600 transition-colors"
-              >
-                About Dr May
-              </a>
-            </div>
+            // Replace the footer links in category/page.tsx
+<div className="flex space-x-6 text-sm">
+  <button 
+    onClick={() => router.push('/about')}
+    className="text-gray-600 hover:text-blue-600 transition-colors"
+  >
+    About optibl
+  </button>
+  <button 
+    onClick={() => router.push('/privacy')}
+    className="text-gray-600 hover:text-blue-600 transition-colors"
+  >
+    Privacy Policy
+  </button>
+  <button 
+    onClick={() => router.push('/terms')}
+    className="text-gray-600 hover:text-blue-600 transition-colors"
+  >
+    Terms of Service
+  </button>
+  <a 
+    href="https://richardjmay.github.io/" 
+    target="_blank" 
+    rel="noopener noreferrer"
+    className="text-gray-600 hover:text-blue-600 transition-colors"
+  >
+    About Dr May
+  </a>
+</div>
           </div>
         </div>
       </footer>

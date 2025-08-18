@@ -7,23 +7,49 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('Missing Supabase environment variables')
 }
 
-// Authenticated client for user operations - with unique storage key
-export const supabase = createClient(supabaseUrl, supabaseKey, {
+// Add connection configuration for Vercel Hobby
+const options = {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storageKey: 'sb-optibl-auth-token', // Unique key for auth client
+    storageKey: 'sb-optibl-auth-token',
     flowType: 'pkce'
+  },
+  db: {
+    schema: 'public'
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 2
+    }
+  },
+  // Add global fetch options to handle Vercel timeouts
+  global: {
+    fetch: (url, options = {}) => {
+      return fetch(url, {
+        ...options,
+        // Add timeout for Vercel Hobby plan
+        signal: AbortSignal.timeout(8000)
+      })
+    }
   }
-})
+}
 
-// Public client for categories - no storage needed since no persistence
+export const supabase = createClient(supabaseUrl, supabaseKey, options)
+
 export const supabasePublic = createClient(supabaseUrl, supabaseKey, {
   auth: { 
     persistSession: false, 
     autoRefreshToken: false, 
     detectSessionInUrl: false
-    // No storageKey needed when persistSession is false
+  },
+  global: {
+    fetch: (url, options = {}) => {
+      return fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(8000)
+      })
+    }
   }
 })
