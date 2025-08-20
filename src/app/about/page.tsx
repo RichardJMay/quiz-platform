@@ -1,109 +1,81 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { Brain, Target, Users, Award, BookOpen, CheckCircle } from 'lucide-react'
+import { Target, Users, Award, BookOpen, CheckCircle } from 'lucide-react' // removed Brain
+import PageLayout from '@/components/layout/PageLayout'
 
 export default function AboutPage() {
   const router = useRouter()
-  
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Header - matching other pages */}
-      <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <button 
-              onClick={() => router.push('/')}
-              className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
-            >
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">O</span>
-              </div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                optibl
-              </h1>
-            </button>
-            <button 
-              onClick={() => router.push('/')}
-              className="text-blue-600 hover:text-blue-800 font-medium"
-            >
-              ← Back to Home
-            </button>
-          </div>
-        </div>
-      </header>
-      
+    <PageLayout>
       <div className="max-w-4xl mx-auto px-4 py-16">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">The Science Behind optibl</h1>
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">The approach behind optibl</h1>
           <p className="text-xl text-gray-600">
-            Personalised Learning Pathways for BCBA Exam Success
+            Personalised practice for BCBA exam preparation
           </p>
         </div>
 
         {/* Main Content */}
         <div className="space-y-12">
-          
+
           {/* Introduction */}
           <div className="bg-white rounded-lg shadow-sm p-8">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4 flex items-center">
-              <Brain className="h-6 w-6 mr-2 text-blue-600" />
-              Learning That Actually Works
+              <BookOpen className="h-6 w-6 mr-2 text-blue-600" />
+              Designed for measurable progress
             </h2>
             <p className="text-gray-700 leading-relaxed text-lg">
-              Most study platforms throw questions at you and hope something sticks. optibl is different. 
-              Every aspect of our platform is built on proven learning science to help you master BCBA 
-              concepts efficiently and permanently.
+              optibl focuses on carefully constructed multiple-choice items and deliberate sequencing.
+              You practice with feedback, track accuracy and pace, and move forward when clear mastery criteria are met.
             </p>
           </div>
 
           {/* Key Principles Grid */}
           <div className="grid md:grid-cols-2 gap-6">
-            
+
             <div className="bg-white rounded-lg shadow-sm p-6 border-l-4 border-blue-500">
               <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                 <Target className="h-5 w-5 mr-2 text-blue-600" />
-                Optimal Challenge Through Smart Sequencing
+                Component → composite sequencing
               </h3>
               <p className="text-gray-700 leading-relaxed">
-                Your brain learns best when content builds systematically from foundational concepts to more 
-                complex applications. optibl sequences questions to maintain the optimal learning zone—challenging 
-                enough to promote growth without causing cognitive overload.
+                Items progress from prerequisite elements to application. Difficulty adjusts to recent performance
+                to keep response effort productive—not trivial, not overwhelming.
               </p>
             </div>
 
             <div className="bg-white rounded-lg shadow-sm p-6 border-l-4 border-green-500">
               <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                 <CheckCircle className="h-5 w-5 mr-2 text-green-600" />
-                Beyond Getting It Right: Building Fluency
+                Fluency: accuracy × pace
               </h3>
               <p className="text-gray-700 leading-relaxed">
-                Knowing the answer isn't enough—you need to access it quickly and confidently under exam 
-                pressure. optibl tracks both accuracy and speed, helping you develop fluency that transfers 
-                to real-world situations.
+                Knowing is useful when it’s fast and stable. optibl provides timed practice and feedback on both
+                correctness and latency so fluent responding is the goal, not just a score.
               </p>
             </div>
 
             <div className="bg-white rounded-lg shadow-sm p-6 border-l-4 border-purple-500">
               <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                 <BookOpen className="h-5 w-5 mr-2 text-purple-600" />
-                Smart Practice Through Interleaving
+                Interleaving for discrimination
               </h3>
               <p className="text-gray-700 leading-relaxed">
-                Instead of studying one topic at a time, optibl mixes topics strategically. This approach 
-                strengthens your ability to discriminate between concepts and apply knowledge flexibly—exactly 
-                what you need for the BCBA exam.
+                Topics are mixed on purpose. Interleaving strengthens stimulus control—selecting the right concept
+                under changing conditions—so skills transfer beyond a single study set.
               </p>
             </div>
 
             <div className="bg-white rounded-lg shadow-sm p-6 border-l-4 border-orange-500">
               <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                 <Award className="h-5 w-5 mr-2 text-orange-600" />
-                Test-Enhanced Learning
+                Retrieval with feedback
               </h3>
               <p className="text-gray-700 leading-relaxed">
-                Every quiz isn't just assessment—it's active learning. The act of retrieving information 
-                from memory strengthens neural pathways, making knowledge more durable and accessible.
+                Quizzes are practice opportunities. Repeated retrieval with immediate, specific feedback builds
+                durable performance and reduces relearning.
               </p>
             </div>
 
@@ -112,12 +84,11 @@ export default function AboutPage() {
           {/* Precision Section */}
           <div className="bg-white rounded-lg shadow-sm p-8">
             <h3 className="text-xl font-semibold text-gray-900 mb-4">
-              Precision Question Sequencing
+              Precision question sequencing
             </h3>
             <p className="text-gray-700 leading-relaxed text-lg">
-              Behind the scenes, sophisticated modeling ensures every question is perfectly positioned in 
-              your learning journey. Questions are calibrated based on thousands of previous responses to 
-              present the right challenge at the right moment, maximizing your study efficiency.
+              We use item statistics (difficulty, discrimination, response time) and simple decision rules
+              to choose the next step. The aim is straightforward: the right amount of challenge at the right time.
             </p>
           </div>
 
@@ -125,65 +96,75 @@ export default function AboutPage() {
           <div className="bg-white rounded-lg shadow-sm p-8">
             <h2 className="text-2xl font-semibold text-gray-900 mb-6 flex items-center">
               <Users className="h-6 w-6 mr-2 text-blue-600" />
-              Expert-Crafted Content
+              Expert-crafted content
             </h2>
-            
+
             <div className="bg-gray-50 rounded-lg p-6 mb-6">
               <p className="text-gray-700 leading-relaxed text-lg mb-4">
-                While AI can generate content quickly, optibl takes a different path. Every question and 
-                explanation is created by <strong>Dr Richard May</strong>, bringing nearly 20 years of 
-                expertise to your learning experience.
+                Every item and explanation is authored and reviewed by <strong>Dr Richard May</strong>.
+                Content is revised in response to learner data, not guesswork.
               </p>
             </div>
 
             {/* Dr May Profile */}
-            <div className="flex flex-col md:flex-row items-start md:items-center space-y-4 md:space-y-0 md:space-x-6 bg-gradient-to-r from-blue-50 to-purple-50 p-6 rounded-lg">
-              <img 
-                src="/images/dr-may-profile.jpg" 
-                alt="Dr Richard May" 
-                className="w-24 h-24 rounded-full object-cover mx-auto md:mx-0 shadow-lg"
+            <div className="flex flex-col md:flex-row items-start space-y-6 md:space-y-0 md:space-x-12 bg-gradient-to-r from-blue-50 to-purple-50 p-8 rounded-lg">
+              <img
+                src="/images/dr-may-profile.jpg"
+                alt="Dr Richard May"
+                className="w-32 h-32 rounded-full object-cover mx-auto md:mx-0 shadow-lg flex-shrink-0"
               />
-              <div className="text-center md:text-left">
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+              <div className="text-center md:text-left flex-grow md:pl-4">
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">
                   Dr Richard May, PhD BCBA-D
                 </h3>
-                <p className="text-sm text-gray-600 mb-3 font-medium">
+                <p className="text-base text-gray-600 mb-4 font-medium">
                   Associate Professor of Behaviour Analysis, University of South Wales
                 </p>
-                <ul className="text-sm text-gray-700 space-y-1">
-                  <li>• Nearly 20 years of international teaching experience</li>
-                  <li>• Teaching roles at Reykjavik University, University of Kent, University of Galway</li>
-                  <li>• External examiner for Masters programmes</li>
-                  <li>• Editorial board member of top behavior analysis journals</li>
+                <ul className="text-sm text-gray-700 space-y-2">
+                  <li className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span>~20 years of international teaching experience</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span>Roles at Reykjavik University, University of Kent, University of Galway</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span>External examiner for Masters programmes</span>
+                  </li>
+                  <li className="flex items-start">
+                    <span className="mr-2">•</span>
+                    <span>Editorial board member of leading behaviour analysis journals</span>
+                  </li>
                 </ul>
               </div>
             </div>
 
             <p className="text-gray-700 leading-relaxed text-lg mt-6">
-              This human expertise ensures content that's not just accurate, but clinically relevant and 
-              pedagogically sound—something no algorithm can replicate.
+              The result is material that is technically accurate, clinically relevant, and teachable.
             </p>
           </div>
 
           {/* The Difference - Call to Action */}
           <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg p-8 text-center">
-            <h2 className="text-2xl font-bold mb-4">The optibl Difference</h2>
+            <h2 className="text-2xl font-bold mb-4">What you can expect</h2>
             <p className="text-lg mb-6">
-              <strong>Science-backed learning</strong> + <strong>Expert content</strong> + <strong>Adaptive technology</strong> = <strong>Faster, more effective BCBA preparation</strong>
+              Clear sequencing · fluency targets · timely feedback · data-guided adjustments
             </p>
             <p className="text-blue-100 mb-4">
-              Ready to experience learning that's designed around how your brain actually works?
+              Ready to try a measured approach to exam prep?
             </p>
-            <button 
+            <button
               onClick={() => router.push('/')}
               className="inline-block bg-white text-blue-600 px-8 py-3 rounded-lg font-semibold hover:bg-blue-50 transition-colors cursor-pointer"
             >
-              Start your personalized pathway to BCBA success
+              Try a sample pathway
             </button>
           </div>
 
         </div>
       </div>
-    </div>
+    </PageLayout>
   )
 }

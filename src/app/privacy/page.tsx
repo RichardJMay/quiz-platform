@@ -1,37 +1,10 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import PageLayout from '@/components/layout/PageLayout'
 
 export default function PrivacyPolicy() {
-  const router = useRouter()
-  
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Header */}
-      <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <button 
-              onClick={() => router.push('/')}
-              className="flex items-center space-x-3 hover:opacity-80 transition-opacity"
-            >
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">Q</span>
-              </div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                Dr May&apos;s Quiz Master Pro
-              </h1>
-            </button>
-            <button 
-              onClick={() => router.push('/')}
-              className="text-blue-600 hover:text-blue-800 font-medium"
-            >
-              ← Back to Home
-            </button>
-          </div>
-        </div>
-      </header>
-
+    <PageLayout>
       {/* Content */}
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-8 md:p-12">
@@ -43,7 +16,7 @@ export default function PrivacyPolicy() {
           <div className="prose prose-lg max-w-none">
             <h2 className="text-2xl font-bold text-gray-900 mt-8 mb-4">1. Introduction</h2>
             <p className="text-gray-700 mb-6">
-              Dr May&apos;s Quiz Master Pro (&ldquo;we,&rdquo; &ldquo;our,&rdquo; or &ldquo;us&rdquo;) operates the website{" "}
+              optibl (&ldquo;we,&rdquo; &ldquo;our,&rdquo; or &ldquo;us&rdquo;) operates the website{" "}
               <span className="font-medium">[YOUR DOMAIN]</span> (the &ldquo;Service&rdquo;).
             </p>
             <p className="text-gray-700 mb-6">
@@ -166,12 +139,12 @@ export default function PrivacyPolicy() {
             <div className="bg-green-50 border border-green-200 rounded-lg p-6 mt-8">
               <h3 className="text-lg font-semibold text-green-800 mb-2">Consent</h3>
               <p className="text-green-700">
-                By using Dr May&apos;s Quiz Master Pro, you acknowledge that you have read and understood this Privacy Policy and agree to its terms.
+                By using optibl, you acknowledge that you have read and understood this Privacy Policy and agree to its terms.
               </p>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </PageLayout>
   );
 }
