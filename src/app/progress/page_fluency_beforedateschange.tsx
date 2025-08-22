@@ -25,7 +25,7 @@ export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuiz, setSelectedQuiz] = useState<string>('all');
-  const [showGraph, setShowGraph] = useState(true);
+  const [showGraph, setShowGraph] = useState(false);
   const [chartType, setChartType] = useState<'fluency' | 'accuracy'>('fluency');
   const { user } = useAuth();
   const router = useRouter();
@@ -67,7 +67,6 @@ export default function ProgressPage() {
           quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes,
         })) as QuizAttempt[];
         setAttempts(typedData);
-        setSelectedQuiz(typedData.length ? typedData[0].quiz_id : 'all');
       }
     } catch (err) {
       console.error('Error in loadAttempts:', err);
@@ -100,15 +99,6 @@ export default function ProgressPage() {
     selectedQuiz === 'all'
       ? attempts
       : attempts.filter((attempt) => attempt.quiz_id === selectedQuiz);
-
-  useEffect(() => {
-  if (!loading && selectedQuiz !== 'all' && filteredAttempts.length > 1) {
-    setShowGraph(true);            // open the graph
-    setChartType('fluency');       // ensure fluency tab
-  }
-}, [loading, selectedQuiz, filteredAttempts.length]);
-
-
 
   const getPerformanceColor = (accuracy: number, fluency: number): string => {
     if (accuracy >= 80 && fluency >= 30) return 'text-green-600 bg-green-50';
@@ -187,240 +177,6 @@ export default function ProgressPage() {
       }));
   };
 
-  // Correct celeration from daily points (× per week on log10 scale)
-const computeCorrectCeleration = ():
-  | { factorPerWeek: number; pointsUsed: number }
-  | null => {
-  if (filteredAttempts.length < 2) return null;
-
-  // one point per calendar day
-  const daily = new Map<string, { t: number; fluency: number }>();
-  filteredAttempts
-    .slice()       // newest → oldest -> copy
-    .reverse()     // oldest → newest for time math
-    .forEach(a => {
-      const t = new Date(a.completed_at).getTime();
-      const dayKey = new Date(t).toISOString().slice(0, 10); // YYYY-MM-DD
-      if (!daily.has(dayKey)) daily.set(dayKey, { t, fluency: a.fluency_rate });
-    });
-
-  const data = Array.from(daily.values()).sort((a, b) => a.t - b.t);
-  if (data.length < 2) return null;
-
-  const dayMs = 86_400_000;
-  const first = data[0].t;
-
-  // x = weeks since first point; y = log10(corrects per min)
-  const x = data.map(d => (d.t - first) / (7 * dayMs));
-  const y = data.map(d => Math.log10(Math.max(0.1, d.fluency)));
-
-  const n = x.length;
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-  for (let i = 0; i < n; i++) {
-    sumX += x[i]; sumY += y[i]; sumXY += x[i] * y[i]; sumX2 += x[i] * x[i];
-  }
-  const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) return null;
-
-  const slopePerWeek = (n * sumXY - sumX * sumY) / denom; // log10 scale
-  const factorPerWeek = Math.pow(10, slopePerWeek);        // × per week
-
- 
-  return { factorPerWeek, pointsUsed: n };
-};
- // Put this inside ProgressPage, above the big return (function declaration style)
-function getPTAdviceForApp(opts: {
-  chartData: { t: number; fluency: number; errorRate: number }[]; // daily points, oldest -> newest
-  correctCeleration?: { slope: number } | null; // per-week on log10 scale
-  errorCeleration?: { slope: number } | null;
-  aimFluency?: number;  // default 25/min
-  aimError?: number;    // default 1/min
-}): { picture: string | null; tips: string[] } {
-  const {
-    chartData,
-    correctCeleration,
-    errorCeleration,
-    aimFluency = 25,
-    aimError = 1,
-  } = opts;
-
-  const tips: string[] = [];
-  if (chartData.length < 2) return { picture: null, tips };
-
-  const last3 = chartData.slice(-3);
-  const last = chartData[chartData.length - 1];
-
-  // helpers
-  const corrX = correctCeleration ? Math.pow(10, correctCeleration.slope) : null; // ×/week
-  const errX  = errorCeleration    ? Math.pow(10, errorCeleration.slope)    : null;
-
-  // Compute recent average duration from the raw attempts (newest first)
-const aimFluencylocal = 25; // or whatever you pass into the helper
-const kDur = Math.min(3, filteredAttempts.length);
-const avgDurationMin =
-  kDur > 0
-    ? filteredAttempts
-        .slice(0, kDur) // newest k
-        .reduce((s, a) => s + (a.total_time_minutes || 1), 0) / kDur
-    : 0;
-
-// Use the last daily point's fluency from the chartData
-const lastFluency = chartData.length ? chartData[chartData.length - 1].fluency : 0;
-
-// Long timing + below aim → suggest shorter sprints
-if (avgDurationMin > 1 && lastFluency < aimFluencylocal * 0.7) {
-  tips.push(
-    "Long timing + below aim — build endurance gradually. Start with 30-second sprints."
-  );
-}
-
-  // learning picture label (simple 2x2 on celerations)
-  let picture: string | null = null;
-if (corrX !== null && errX !== null) {
-  if (corrX > 1.4 && errX < 0.7) {
-    picture = "Strong Jaws (excellent progress)";
-  } else if (corrX > 1.25 && errX < 0.9) {
-    picture = "Jaws (good progress)";
-  } else if (corrX > 1.0 && errX < 1.0) {
-    picture = "Weak Jaws (marginal progress)";
-  } else if (corrX > 1.0 && errX > 1.0) {
-    picture = "Both rising (watch errors)";
-  } else if (corrX < 1.0 && errX < 1.0) {
-    picture = "Both falling (stall/dive)";
-  } else if (corrX < 1.0 && errX > 1.0) {
-    picture = "Opposition (trouble)";
-  }
-}
-
-
-// --- Aim line crossover: 5 of last 7 at/above aim ---
-const daysAboveAim = chartData.slice(-7).filter(d => d.fluency >= aimFluency).length;
-if (daysAboveAim >= 5) {
-  tips.push(`5+ days above aim — advance to harder material or raise aim to ~${aimFluency + 10}/min.`);
-}
-
-// helper: OLS slope over equally spaced points (returns slope on log10 scale per point)
-function slopeOLS(y: number[]): number | null {
-  const n = y.length;
-  if (n < 2) return null;
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-  for (let i = 0; i < n; i++) {
-    const x = i, yi = y[i];
-    sumX += x; sumY += yi; sumXY += x * yi; sumX2 += x * x;
-  }
-  const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) return null;
-  return (n * sumXY - sumX * sumY) / denom;
-}
-
-// --- Plateau detection: recent vs prior window ---
-if (chartData.length >= 10) {
-  // Use log10(corrects) to mirror SCC logic
-  const recent7 = chartData.slice(-7).map(d => Math.log10(Math.max(0.1, d.fluency)));
-  const prior7  = chartData.slice(-14, -7).map(d => Math.log10(Math.max(0.1, d.fluency)));
-
-  const recentSlope = slopeOLS(recent7);   // per-point (≈ per session/day)
-  const priorSlope  = slopeOLS(prior7);
-
-  // thresholds: ~flat if |m| < 0.02 (≈ ×1.05/day). Prior was clearly rising if > 0.05 (~×1.12/day).
-  if (
-    recentSlope !== null && priorSlope !== null &&
-    Math.abs(recentSlope) < 0.02 && Math.abs(priorSlope) > 0.05
-  ) {
-    tips.push("Celeration flattened — implement a quick 'slice back' protocol: slightly easier set for ~3 days to rebuild momentum, then resume.");
-  }
-}
-
-
-  // decision checks
-  const atAimLast3 =
-    last3.filter(d => d.fluency >= aimFluency && d.errorRate <= aimError).length >= 2;
-
-  const flatLast3 = last3.length === 3 ? (() => {
-    const arr = last3.map(d => d.fluency);
-    const max = Math.max(...arr), min = Math.min(...arr);
-    return max / Math.max(min, 0.1) < 1.10; // within ±10%
-  })() : false;
-
-  // bounce (variability) over last 5
-  const recent = chartData.slice(-5);
-  const mean = recent.reduce((s,d)=>s+d.fluency,0) / recent.length;
-  const sd = recent.length > 1
-    ? Math.sqrt(recent.reduce((s,d)=>s + (d.fluency - mean)**2, 0) / (recent.length - 1))
-    : 0;
-  const cv = mean > 0 ? sd / mean : 0; // coefficient of variation
-
-  // tips (no miss-only timings; focus on noting/correcting errors and shaping corrects)
-  if (picture === "Jaws (corrects ↑, errors ↓)") {
-    tips.push(`Healthy pattern (${corrX!.toFixed(2)}× corrects, ${errX!.toFixed(2)}× errors) — keep course.`);
-    if (atAimLast3) tips.push("At aim on 2 of last 3 — consider raising the aim or moving to next set.");
-  }
-
-  if (corrX !== null && corrX < 1.25) {
-    tips.push(`Corrects celeration is ×${corrX.toFixed(2)}/week (<×1.25) — adjust instruction: shorten sets, increase opportunities, or add brief extra practice blocks.`);
-  }
-
-  if (errX !== null && errX > 1.10) {
-    tips.push(`Errors accelerating (×${errX.toFixed(2)}/week) — ensure immediate corrective feedback is noted and rehearsed (model → guided → independent), and consider simplifying or pre-teaching tricky items.`);
-  }
-
-  if (last.errorRate > aimError) {
-    tips.push(`Errors above aim (>${aimError}/min) — tighten prompts and modeling on missed items; log which items miss so the next set emphasises those.`);
-  }
-
-  if (flatLast3) {
-    tips.push("Three days of flat corrects — change something (slice the skill finer, adjust timing length, or increase reinforcement density).");
-  }
-
-  if (cv > 0.5 && recent.length >= 3) {
-    tips.push("High variability — standardize timing conditions (same time/place, brief warm-up) and ensure consistent timing length.");
-  }
-
-  if (!tips.length) {
-    tips.push("Maintain course and keep logging misses for targeted review.");
-  }
-
-  // Crossover detection
-if (last.fluency < last.errorRate) {
-  tips.push("CRITICAL: Errors exceed corrects - stop and reteach. This indicates guessing or confusion.");
-}
-
-// Ignore/junk detection (classic PT marker)
-if (corrX && corrX > 1.5 && errX && errX > 1.5) {
-  tips.push("Both accelerating rapidly - possible 'ignore' pattern. Check if learner is rushing without reading.");
-}
-
-// Retention check
-if (chartData.length > 7) {
-  const weekAgo = chartData[chartData.length - 8];
-  if (last.fluency < weekAgo.fluency * 0.8) {
-    tips.push("Performance dropped >20% from a week ago - review retention strategies.");
-  }
-}
-
-// Low frequency + slow acceleration
-if (last.fluency < 10 && corrX !== null && corrX < 1.25) {
-  tips.push("Low frequency of corrects + slow acceleration — add brief untimed practice between daily timings. Use 'see item → say answer' drills during the day.");
-}
-
-// Moderate bounce
-if (cv !== null && cv > 0.3 && cv <= 0.5) {
-  tips.push("Moderate bounce — standardize the pre-timing routine. Try 2–3 quick practice items before starting.");
-}
-
-// Persistent errors
-if (chartData.slice(-3).every(d => d.errorRate > 2)) {
-  tips.push("Consistent errors >2/min for 3 days - create separate practice for frequently missed items. Consider errorless teaching procedures.");
-}
-
-// Error acceleration without correct acceleration
-if (corrX && corrX < 1.1 && errX && errX > 1.2) {
-  tips.push("Errors growing faster than corrects - possible fatigue or item confusion. Shorten timing to 30 seconds or clarify similar items.");
-}
-
-  return { picture, tips };
-}
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -434,8 +190,6 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
 
   const stats = getOverallStats();
 
-  const cel = computeCorrectCeleration();
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -443,10 +197,10 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-              Performance Analysis
+              Progress History
             </h1>
             <p className="text-gray-600">
-              Tracking and data-based decision analysis
+              Track your quiz performance over time
             </p>
           </div>
           <button
@@ -483,7 +237,7 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                 htmlFor="quiz-filter"
                 className="block text-sm font-medium text-gray-700 mb-2"
               >
-                Filter by Topic:
+                Filter by Quiz:
               </label>
               <select
                 id="quiz-filter"
@@ -491,13 +245,12 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                 onChange={(e) => setSelectedQuiz(e.target.value)}
                 className="w-full sm:w-auto px-3 py-3 text-base text-gray-900 bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
               >
-               
+                <option value="all">All Quizzes Combined</option>
                 {getUniqueQuizzes().map(([quizId, title]) => (
                   <option key={quizId} value={quizId}>
                     {title}
                   </option>
                 ))}
-                 <option value="all">All Topics Combined</option>
               </select>
             </div>
 
@@ -531,7 +284,12 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                         <span className="block">Last {stats.movingWindow}</span>
                         </div>
                   </div>
-                
+                  <div className="bg-white rounded-lg shadow p-4 text-center">
+                    <div className="text-2xl font-bold text-purple-600">
+                      {stats.avgFluency.toFixed(1)}
+                    </div>
+                    <div className="text-sm text-gray-600">Avg Fluency</div>
+                  </div>
                   <div className="bg-white rounded-lg shadow p-4 text-center">
                     <div className="text-2xl font-bold text-yellow-600">
                       {stats.bestAccuracy}%
@@ -542,24 +300,8 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                     <div className="text-2xl font-bold text-red-600">
                       {stats.bestFluency.toFixed(1)}
                     </div>
-                    <div className="text-sm text-gray-600">
-                        <span className="block">Best Rate</span>
-                         <span className="block">per Minute</span>
-                        </div>
+                    <div className="text-sm text-gray-600">Best Fluency</div>
                   </div>
-                  <div className="bg-white rounded-lg shadow p-4 text-center">
-  <div
-    className={`text-2xl font-bold ${
-      cel && cel.factorPerWeek >= 1 ? 'text-green-600' : 'text-red-600'
-    }`}
-  >
-    {cel ? `×${cel.factorPerWeek.toFixed(2)}` : '—'}
-  </div>
-  <div className="text-sm text-gray-600">
-    <span className="block">Fluency Trend</span>
-    <span className="block">per Week</span>
-  </div>
-</div>
                   <div className="bg-white rounded-lg shadow p-4 text-center">
                     <div
                       className={`text-2xl font-bold ${
@@ -573,7 +315,19 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                     </div>
                     <div className="text-sm text-gray-600">Accuracy Trend</div>
                   </div>
-                  
+                  <div className="bg-white rounded-lg shadow p-4 text-center">
+                    <div
+                      className={`text-2xl font-bold ${
+                        stats.fluencyImprovement >= 0
+                          ? 'text-green-600'
+                          : 'text-red-600'
+                      }`}
+                    >
+                      {stats.fluencyImprovement > 0 ? '+' : ''}
+                      {stats.fluencyImprovement.toFixed(1)}
+                    </div>
+                    <div className="text-sm text-gray-600">Fluency Trend</div>
+                  </div>
                 </div>
 
                 {/* Progress Graph */}
@@ -621,41 +375,48 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                             <h3 className="text-lg font-semibold text-gray-900 mb-4">
                               Standard Celeration Chart - Fluency
                             </h3>
-                            {/* responsive wrapper */}
-  <div className="w-full aspect-[1000/550]">
-    <svg
-      viewBox="0 0 1000 550"
-      className="w-full h-full bg-white"
-      preserveAspectRatio="xMidYMid meet"
-    >
+                            <svg
+                              width="100%"
+                              height="550"
+                              viewBox="0 0 1000 550"
+                              className="bg-white"
+                            >
                               {(() => {
                                 type SCCDatum = {
-                                  t: number;  
-                                  dateLabel: string;
+                                  date: string;
                                   fluency: number;
                                   errors: number;
                                   errorRate: number;
                                 };
 
                                 const processDataForSCC = (): SCCDatum[] => {
-  const daily = new Map<string, SCCDatum>(); // key per calendar day
-  filteredAttempts.slice().reverse().forEach((attempt) => {
-    const ts = new Date(attempt.completed_at).getTime();
-    const dayKey = new Date(ts).toISOString().slice(0, 10); // YYYY-MM-DD
-    if (!daily.has(dayKey)) {
-      daily.set(dayKey, {
-        t: ts,
-        dateLabel: new Date(ts).toLocaleDateString(),
-        fluency: attempt.fluency_rate,
-        errors: attempt.total_questions - attempt.correct_answers,
-        errorRate:
-          (attempt.total_questions - attempt.correct_answers) /
-          (attempt.total_time_minutes || 1),
-      });
-    }
-  });
-  return Array.from(daily.values());
-};
+                                  const dailyData = new Map<string, SCCDatum>();
+
+                                  filteredAttempts
+                                    .slice()
+                                    .reverse()
+                                    .forEach((attempt) => {
+                                      const date = new Date(
+                                        attempt.completed_at,
+                                      ).toLocaleDateString();
+                                      if (!dailyData.has(date)) {
+                                        dailyData.set(date, {
+                                          date,
+                                          fluency: attempt.fluency_rate,
+                                          errors:
+                                            attempt.total_questions -
+                                            attempt.correct_answers,
+                                          errorRate:
+                                            (attempt.total_questions -
+                                              attempt.correct_answers) /
+                                            (attempt.total_time_minutes || 1),
+                                        });
+                                      }
+                                    });
+
+                                  return Array.from(dailyData.values());
+                                };
+
                                 const chartData = processDataForSCC();
                                 const chartHeight = 420;
                                 const chartWidth = 750;
@@ -668,23 +429,9 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                                 const maxLog = 2;
                                 const logRange = maxLog - minLog;
 
-                                // --- calendar-based X positioning ---
-                                const dayMs = 86_400_000;
-const firstT = chartData.length ? chartData[0].t : 0;
-
-const daysSince = (t: number) =>
-  firstT ? Math.max(0, Math.floor((t - firstT) / dayMs)) : 0;
-
-const spanDays = chartData.length
-  ? Math.max(1, daysSince(chartData[chartData.length - 1].t))
-  : 1;
-
-const offsetDays = 1; // left pad in “days”
-const daysToShow = Math.max(140, spanDays);
-const xStep = chartWidth / (daysToShow + offsetDays);
-const xOffset = offsetDays * xStep;
-
-const xAt = (t: number) => startX + xOffset + daysSince(t) * xStep;
+                                const daysToShow = 140;
+                                const xStep = chartWidth / daysToShow;
+                                const xOffset = xStep * 2;
 
                                 const toLogY = (value: number): number => {
                                   if (value <= 0)
@@ -702,28 +449,44 @@ const xAt = (t: number) => startX + xOffset + daysSince(t) * xStep;
                                 };
 
                                 const calculateCeleration = (
-  data: SCCDatum[],
-  useErrors: boolean = false,
-): { slope: number; intercept: number } | null => {
-  if (data.length < 2) return null;
+                                  data: SCCDatum[],
+                                  useErrors: boolean = false,
+                                ):
+                                  | { slope: number; intercept: number }
+                                  | null => {
+                                  if (data.length < 2) return null;
 
- const firstT = data[0].t;
-const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
-  const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
+                                  const values = data.map((d) =>
+                                    Math.log10(
+                                      Math.max(
+                                        0.1,
+                                        useErrors ? d.errorRate : d.fluency,
+                                      ),
+                                    ),
+                                  );
+                                  const n = values.length;
 
-  const n = xWeeks.length;
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-  for (let i = 0; i < n; i++) {
-    const x = xWeeks[i], y = yVals[i];
-    sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x;
-  }
-  const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) return null;
+                                  let sumX = 0,
+                                    sumY = 0,
+                                    sumXY = 0,
+                                    sumX2 = 0;
+                                  values.forEach((y, x) => {
+                                    sumX += x;
+                                    sumY += y;
+                                    sumXY += x * y;
+                                    sumX2 += x * x;
+                                  });
 
-  const slope = (n * sumXY - sumX * sumY) / denom; // pp on log10 scale per week
-  const intercept = (sumY - slope * sumX) / n;
-  return { slope, intercept };
-};
+                                  const denom = n * sumX2 - sumX * sumX;
+                                  if (denom === 0) return null;
+
+                                  const slope =
+                                    (n * sumXY - sumX * sumY) / denom;
+                                  const intercept = (sumY - slope * sumX) / n;
+
+                                  // scale slope to per-week (×7)
+                                  return { slope: slope * 7, intercept };
+                                };
 
                                 const correctCeleration =
                                   calculateCeleration(chartData);
@@ -895,17 +658,34 @@ const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
                                      Incorrect aim: ≤{errorAim}/min
                                      </text>
 
-                                   {Array.from({ length: Math.ceil(daysToShow / 7) }, (_, i) => i + 1).map(week => {
-  const x = startX + xOffset + week * 7 * xStep;
-  return (
-    <g key={week}>
-      <line x1={x} y1={startY} x2={x} y2={startY + chartHeight} stroke="#E5E7EB" strokeWidth="1" />
-      <text x={x} y={startY + chartHeight + 20} textAnchor="middle" fontSize="11" fill="#6B7280">
-        {week}
-      </text>
-    </g>
-  );
-})}
+                                    {Array.from(
+                                      { length: 20 },
+                                      (_unused: unknown, i: number) => i + 1,
+                                    ).map((week) => {
+                                      const x =
+                                        startX + week * 7 * xStep;
+                                      return (
+                                        <g key={week}>
+                                          <line
+                                            x1={x}
+                                            y1={startY}
+                                            x2={x}
+                                            y2={startY + chartHeight}
+                                            stroke="#E5E7EB"
+                                            strokeWidth="1"
+                                          />
+                                          <text
+                                            x={x}
+                                            y={startY + chartHeight + 20}
+                                            textAnchor="middle"
+                                            fontSize="11"
+                                            fill="#6B7280"
+                                          >
+                                            {week}
+                                          </text>
+                                        </g>
+                                      );
+                                    })}
 
                                     
 
@@ -913,7 +693,7 @@ const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
                                       <g key={`correct-${i}`}>
                                         <circle
                                           cx={
-                                            xAt(d.t)
+                                            startX + xOffset + i * xStep
                                           }
                                           cy={toLogY(d.fluency)}
                                           r="4"
@@ -921,7 +701,9 @@ const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
                                           stroke="#fff"
                                           strokeWidth="2"
                                         />
-                                        <title>{`${d.dateLabel}: ${d.fluency.toFixed(1)} correct/min`}</title>
+                                        <title>{`${d.date}: ${d.fluency.toFixed(
+                                          1,
+                                        )} correct/min`}</title>
                                       </g>
                                     ))}
 
@@ -931,7 +713,9 @@ const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
                                           <g key={`error-${i}`}>
                                             <text
                                               x={
-                                                xAt(d.t)
+                                                startX +
+                                                xOffset +
+                                                i * xStep
                                               }
                                               y={
                                                 toLogY(d.errorRate) + 4
@@ -943,32 +727,45 @@ const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
                                             >
                                               ×
                                             </text>
-                                            <title>{`${d.dateLabel}: ${d.errorRate.toFixed(1)} errors/min`}</title>
+                                            <title>{`${d.date}: ${d.errorRate.toFixed(
+                                              1,
+                                            )} errors/min`}</title>
                                           </g>
                                         );
                                       }
                                       return null;
                                     })}
 
-                                   {correctCeleration && chartData.length > 1 && (
-  <line
-    x1={xAt(chartData[0].t)}
-    x2={xAt(chartData[chartData.length - 1].t)}
-    y1={toLogY(Math.pow(10, correctCeleration.intercept))}
-    y2={toLogY(
-      Math.pow(
-    10,
-    correctCeleration.intercept +
-      correctCeleration.slope *
-      ((chartData[chartData.length - 1].t - chartData[0].t) / (7 * dayMs))
-  )
-)}
-    stroke="url(#blueGradient)"
-    strokeWidth="2"
-    strokeDasharray="5,5"
-    opacity="0.8"
-  />
-)}
+                                    {correctCeleration &&
+                                      chartData.length > 2 && (
+                                        <line
+                                          x1={startX + xOffset}
+                                          y1={toLogY(
+                                            Math.pow(
+                                              10,
+                                              correctCeleration.intercept,
+                                            ),
+                                          )}
+                                          x2={
+                                            startX +
+                                            xOffset +
+                                            (chartData.length - 1) * xStep
+                                          }
+                                          y2={toLogY(
+                                            Math.pow(
+                                              10,
+                                              correctCeleration.intercept +
+                                                (correctCeleration.slope *
+                                                  (chartData.length - 1)) /
+                                                  7,
+                                            ),
+                                          )}
+                                          stroke="url(#blueGradient)"
+                                          strokeWidth="2"
+                                          strokeDasharray="5,5"
+                                          opacity="0.8"
+                                        />
+                                      )}
 
                                     <text
                                       x={startX + chartWidth / 2}
@@ -1016,78 +813,18 @@ const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
                                 );
                               })()}
                             </svg>
-                            </div>
-                             {/* 👇 PASTE THIS BLOCK *RIGHT AFTER* THE SVG WRAPPER */}
-    {(() => {
-      // Rebuild the daily SCC data from filteredAttempts (oldest -> newest)
-     const daily = new Map<string, { t: number; fluency: number; errorRate: number }>();
-  filteredAttempts.slice().reverse().forEach(a => {
-    const t = new Date(a.completed_at).getTime();
-    const key = new Date(t).toISOString().slice(0, 10);
-    if (!daily.has(key)) {
-      daily.set(key, {
-        t,
-        fluency: a.fluency_rate,
-        errorRate: (a.total_questions - a.correct_answers) / (a.total_time_minutes || 1),
-      });
-    }
-  });
-  const chartData = Array.from(daily.values());
-
-  // same calc you use in the SVG
-  const dayMs = 86_400_000;
-  const calc = (data: typeof chartData, useErrors = false) => {
-    if (data.length < 2) return null;
-    const first = data[0].t;
-    const xWeeks = data.map(d => (d.t - first) / (7 * dayMs));
-    const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
-    const n = xWeeks.length;
-    let sumX=0,sumY=0,sumXY=0,sumX2=0;
-    for (let i=0;i<n;i++){ const x=xWeeks[i], y=yVals[i]; sumX+=x; sumY+=y; sumXY+=x*y; sumX2+=x*x; }
-    const denom = n*sumX2 - sumX*sumX;
-    if (denom === 0) return null;
-    const slope = (n*sumXY - sumX*sumY) / denom;
-    const intercept = (sumY - slope*sumX) / n;
-    return { slope, intercept };
-  };
-
-  const correctCeleration = calc(chartData);
-  const errorCeleration   = calc(chartData, true);
-
-  const { picture, tips } = getPTAdviceForApp({
-    chartData,
-    correctCeleration,
-    errorCeleration,
-    aimFluency: 25,
-    aimError: 1,
-  });
-
-  if (!tips.length) return null;
-  return (
-    <div className="mt-6 bg-white border border-gray-200 rounded-xl p-5">
-      {picture && <div className="text-xl font-semibold text-gray-900 mb-1">Pattern: {picture}</div>}
-      <div className="text-xl font-semibold text-gray-900 mb-2">Suggested next steps</div>
-      <ul className="list-disc pl-5 space-y-2 text-lg text-gray-800">
-        {tips.map((t, i) => <li key={i}>{t}</li>)}
-      </ul>
-    </div>
-  );
-})()}
-    {/* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ */}
                           </div>
                         ) : (
                           <div className="bg-white rounded-lg shadow-lg p-6">
                             <h3 className="text-lg font-semibold text-gray-900 mb-4">
                               Accuracy Chart
                             </h3>
-                           
-                            {/* responsive wrapper */}
-                                <div className="w-full aspect-[1000/550]">
-                                    <svg
-                                        viewBox="0 0 1000 550"
-                                        className="w-full h-full bg-white"
-                                        preserveAspectRatio="xMidYMid meet"
-                                     >
+                            <svg
+                              width="100%"
+                              height="550"
+                              viewBox="0 0 1000 550"
+                              className="bg-white"
+                            >
                               {(() => {
                                 const chartData = getProgressChartData();
                                 const chartHeight = 420;
@@ -1363,9 +1100,7 @@ const trend =
                               })()}
                             </svg>
                           </div>
-                        </div>
                         )}
-
 
                         <div className="mt-6 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200 shadow-sm">
                           {chartType === 'fluency' ? (
@@ -1412,8 +1147,8 @@ const trend =
                                 </div>
                               </div>
                               <p className="text-xs text-gray-500 mt-3 italic">
-                                Logarithmic scale (0.1-100/min) • One data point recorded per
-                                day (first attempt) • ×1.4/week = excellent progress
+                                Logarithmic scale (0.1-100/min) • One point per
+                                day • ×1.4/week = excellent progress
                               </p>
                             </>
                           ) : (
@@ -1425,13 +1160,13 @@ const trend =
                                 <div className="flex items-center gap-2">
                                   <div className="w-4 h-4 bg-gradient-to-r from-green-500 to-green-400 rounded-full shadow-sm"></div>
                                   <span className="text-gray-700">
-                                    ≥90% (Target met)
+                                    ≥80% (Target met)
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <div className="w-4 h-4 bg-red-500 rounded-full shadow-sm"></div>
                                   <span className="text-gray-700">
-                                    &lt;90% (Below target)
+                                    &lt;80% (Below target)
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1460,4 +1195,3 @@ const trend =
     </div>
   );
 }
-
