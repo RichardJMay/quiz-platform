@@ -1,11 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-
 
 interface QuizAttempt {
   id: string;
@@ -32,8 +30,6 @@ export default function ProgressPage() {
   const { user } = useAuth();
   const router = useRouter();
   const loadingRef = useRef(false);
-  const [fromDate, setFromDate] = useState<string | null>(null);
-
 
   const loadAttempts = async (): Promise<void> => {
     if (!user) return;
@@ -82,11 +78,6 @@ export default function ProgressPage() {
   };
 
   useEffect(() => {
-    setFromDate(null);
-  }, [selectedQuiz]);
-
-
-  useEffect(() => {
     if (!user) {
       router.push('/');
       return;
@@ -116,14 +107,6 @@ export default function ProgressPage() {
     setChartType('fluency');       // ensure fluency tab
   }
 }, [loading, selectedQuiz, filteredAttempts.length]);
-
-    const dateRange = useMemo(() => {
-        if (!filteredAttempts.length) return null;
-    const ts = filteredAttempts.map(a => new Date(a.completed_at).getTime());
-    const min = Math.min(...ts), max = Math.max(...ts);
-    const toInput = (t: number) => new Date(t).toISOString().slice(0, 10);
-        return { min: toInput(min), max: toInput(max) };
-}, [filteredAttempts]);
 
 
 
@@ -455,34 +438,25 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-
-     {/* Header */}
-<div className="bg-white shadow-sm border-b">
-  <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
-    <div>
-      <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-        Performance Analysis
-      </h1>
-      <p className="text-gray-600">Tracking and data-based decision analysis</p>
-    </div>
-
-    <div className="flex items-center gap-2">
-      <Link
-        href="/leaderboard"
-        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-      >
-        Leaderboard
-      </Link>
-      <Link
-        href="/"
-        className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-      >
-        Return Home
-      </Link>
-    </div>
-  </div>
-</div>
-
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+              Performance Analysis
+            </h1>
+            <p className="text-gray-600">
+              Tracking and data-based decision analysis
+            </p>
+          </div>
+          <button
+            onClick={() => router.push('/')}
+            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            Return Home
+          </button>
+        </div>
+      </div>
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         {attempts.length === 0 ? (
@@ -647,29 +621,6 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
                             <h3 className="text-lg font-semibold text-gray-900 mb-4">
                               Fluency
                             </h3>
-
-    {/* From-date control */}
-    <div className="flex flex-wrap items-center gap-2 mb-3">
-      <label className="text-sm text-gray-600">Show celeration from:</label>
-      <input
-        type="date"
-        className="px-2 py-1 border rounded text-sm"
-        min={dateRange?.min}
-        max={dateRange?.max}
-        value={fromDate ?? ''}
-        onChange={(e) => setFromDate(e.target.value || null)}
-      />
-      {fromDate && (
-        <button
-          onClick={() => setFromDate(null)}
-          className="text-sm text-gray-600 underline"
-        >
-          Reset
-        </button>
-      )}
-    </div>
-
-
                             {/* responsive wrapper */}
   <div className="w-full aspect-[1000/550]">
     <svg
@@ -735,12 +686,6 @@ const xOffset = offsetDays * xStep;
 
 const xAt = (t: number) => startX + xOffset + daysSince(t) * xStep;
 
-// 3a — split by selected date
-const startT = fromDate ? Date.parse(fromDate + 'T00:00:00Z') : NaN;
-const hasStart = Number.isFinite(startT);
-const preData  = hasStart ? chartData.filter(d => d.t <  startT) : [];
-const postData = hasStart ? chartData.filter(d => d.t >= startT) : chartData;
-
                                 const toLogY = (value: number): number => {
                                   if (value <= 0)
                                     return startY + chartHeight;
@@ -756,15 +701,15 @@ const postData = hasStart ? chartData.filter(d => d.t >= startT) : chartData;
                                   );
                                 };
 
-const calculateCeleration = (
+                                const calculateCeleration = (
   data: SCCDatum[],
   useErrors: boolean = false,
 ): { slope: number; intercept: number } | null => {
   if (data.length < 2) return null;
 
-const firstT = data[0].t;
+ const firstT = data[0].t;
 const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
-const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
+  const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
 
   const n = xWeeks.length;
   let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
@@ -780,12 +725,10 @@ const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : 
   return { slope, intercept };
 };
 
-        // 3b — celerations before/after the selected date
-const correctCelBefore = preData.length  > 1 ? calculateCeleration(preData)        : null;
-const errorCelBefore   = preData.length  > 1 ? calculateCeleration(preData, true) : null;
-const correctCelAfter  = postData.length > 1 ? calculateCeleration(postData)       : null;
-const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, true): null;
-
+                                const correctCeleration =
+                                  calculateCeleration(chartData);
+                                const errorCeleration =
+                                  calculateCeleration(chartData, true);
 
                                 
                                 const getIdealProjection = (): number | null => {
@@ -964,123 +907,88 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
   );
 })}
 
-      {hasStart && (
-  <g>
-    <line
-      x1={xAt(startT)} y1={startY} x2={xAt(startT)} y2={startY + chartHeight}
-      stroke="#10B981" strokeWidth="1" strokeDasharray="4,3"
-    />
-    <text x={xAt(startT) + 6} y={startY + 14} fontSize="12" fill="#065F46">From here</text>
-  </g>
-)}
-                              
+                                    
+
+                                    {chartData.map((d, i) => (
+                                      <g key={`correct-${i}`}>
+                                        <circle
+                                          cx={
+                                            xAt(d.t)
+                                          }
+                                          cy={toLogY(d.fluency)}
+                                          r="4"
+                                          fill="url(#blueGradient)"
+                                          stroke="#fff"
+                                          strokeWidth="2"
+                                        />
+                                        <title>{`${d.dateLabel}: ${d.fluency.toFixed(1)} correct/min`}</title>
+                                      </g>
+                                    ))}
 
                                     {chartData.map((d, i) => {
-  const faded = hasStart && d.t < startT;
-  return (
-    <g key={`correct-${i}`} opacity={faded ? 0.25 : 1}>
-      <circle cx={xAt(d.t)} cy={toLogY(d.fluency)} r="4" fill="url(#blueGradient)" stroke="#fff" strokeWidth="2" />
-      <title>{`${d.dateLabel}: ${d.fluency.toFixed(1)} correct/min`}</title>
-    </g>
-  );
-})}
+                                      if (d.errorRate > 0) {
+                                        return (
+                                          <g key={`error-${i}`}>
+                                            <text
+                                              x={
+                                                xAt(d.t)
+                                              }
+                                              y={
+                                                toLogY(d.errorRate) + 4
+                                              }
+                                              textAnchor="middle"
+                                              fontSize="14"
+                                              fill="#EF4444"
+                                              fontWeight="bold"
+                                            >
+                                              ×
+                                            </text>
+                                            <title>{`${d.dateLabel}: ${d.errorRate.toFixed(1)} errors/min`}</title>
+                                          </g>
+                                        );
+                                      }
+                                      return null;
+                                    })}
 
-
-                                    {chartData.map((d, i) => {
-  if (d.errorRate <= 0) return null;
-  const faded = hasStart && d.t < startT; // dim points before selected date
-  return (
-    <g key={`error-${i}`} opacity={faded ? 0.25 : 1}>
-      <text
-        x={xAt(d.t)}
-        y={toLogY(d.errorRate) + 4}
-        textAnchor="middle"
-        fontSize="14"          // keep your current size
-        fill="#EF4444"
-        fontWeight="bold"
-      >
-        ×
-      </text>
-      <title>{`${d.dateLabel}: ${d.errorRate.toFixed(1)} errors/min`}</title>
-    </g>
-  );
-})}
-
-
-                                  {/* BEFORE (faint, dashed) */}
-{hasStart && correctCelBefore && preData.length > 1 && (
+                                   {correctCeleration && chartData.length > 1 && (
   <line
-    x1={xAt(preData[0].t)}
-    y1={toLogY(Math.pow(10, correctCelBefore.intercept))}
-    x2={xAt(preData[preData.length - 1].t)}
-    y2={toLogY(Math.pow(
-      10,
-      correctCelBefore.intercept +
-      correctCelBefore.slope *
-      ((preData[preData.length - 1].t - preData[0].t) / (7 * dayMs))
-    ))}
-    stroke="#6B7280"
-    strokeWidth="2"
-    strokeDasharray="6,4"
-    opacity="0.6"
-  />
+    x1={xAt(chartData[0].t)}
+    x2={xAt(chartData[chartData.length - 1].t)}
+    y1={toLogY(Math.pow(10, correctCeleration.intercept))}
+    y2={toLogY(
+      Math.pow(
+    10,
+    correctCeleration.intercept +
+      correctCeleration.slope *
+      ((chartData[chartData.length - 1].t - chartData[0].t) / (7 * dayMs))
+  )
 )}
-
-{hasStart && errorCelBefore && preData.length > 1 && (
-  <line
-    x1={xAt(preData[0].t)}
-    y1={toLogY(Math.pow(10, errorCelBefore.intercept))}
-    x2={xAt(preData[preData.length - 1].t)}
-    y2={toLogY(Math.pow(
-      10,
-      errorCelBefore.intercept +
-      errorCelBefore.slope *
-      ((preData[preData.length - 1].t - preData[0].t) / (7 * dayMs))
-    ))}
-    stroke="#EF4444"
-    strokeWidth="2"
-    strokeDasharray="6,4"
-    opacity="0.6"
-  />
-)}
-
-{/* AFTER (main, dashed) */}
-{correctCelAfter && postData.length > 1 && (
-  <line
-    x1={xAt(postData[0].t)}
-    y1={toLogY(Math.pow(10, correctCelAfter.intercept))}
-    x2={xAt(postData[postData.length - 1].t)}
-    y2={toLogY(Math.pow(
-      10,
-      correctCelAfter.intercept +
-      correctCelAfter.slope *
-      ((postData[postData.length - 1].t - postData[0].t) / (7 * dayMs))
-    ))}
     stroke="url(#blueGradient)"
     strokeWidth="2"
     strokeDasharray="5,5"
-    opacity="0.9"
+    opacity="0.8"
   />
 )}
 
-{errorCelAfter && postData.length > 1 && (
+{errorCeleration && chartData.length > 1 && (
   <line
-    x1={xAt(postData[0].t)}
-    y1={toLogY(Math.pow(10, errorCelAfter.intercept))}
-    x2={xAt(postData[postData.length - 1].t)}
-    y2={toLogY(Math.pow(
-      10,
-      errorCelAfter.intercept +
-      errorCelAfter.slope *
-      ((postData[postData.length - 1].t - postData[0].t) / (7 * dayMs))
-    ))}
-    stroke="#EF4444"
+    x1={xAt(chartData[0].t)}
+    y1={toLogY(Math.pow(10, errorCeleration.intercept))}
+    x2={xAt(chartData[chartData.length - 1].t)}
+    y2={toLogY(
+      Math.pow(
+        10,
+        errorCeleration.intercept +
+          errorCeleration.slope *
+          ((chartData[chartData.length - 1].t - chartData[0].t) / (7 * dayMs))
+      )
+    )}
+    stroke="#EF4444"          // red
     strokeWidth="2"
     strokeDasharray="5,5"
-    opacity="0.9"
+    opacity="0.8"
   />
 )}
-
 
                                     <text
                                       x={startX + chartWidth / 2}
@@ -1107,46 +1015,22 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
                                       COUNT PER MINUTE
                                     </text>
 
-                                  <g transform={`translate(${startX + chartWidth - 255}, ${startY +320})`}>
-  <rect x="0" y="0" width="250" height={hasStart ? 90 : 70} fill="white" stroke="#E5E7EB" strokeWidth="1" rx="8"/>
-  {hasStart ? (
-    <>
-      {correctCelAfter && (
-        <text x="10" y="20" fontSize="12" fill="#3B82F6" fontWeight="500">
-          Correct from chosen date: ×{Math.pow(10, correctCelAfter.slope).toFixed(2)}/wk
-        </text>
-      )}
-      {correctCelBefore && (
-        <text x="10" y="38" fontSize="12" fill="#6B7280" fontWeight="500">
-          Correct before chosen date: ×{Math.pow(10, correctCelBefore.slope).toFixed(2)}/wk
-        </text>
-      )}
-      {errorCelAfter && (
-        <text x="10" y="56" fontSize="12" fill="#EF4444" fontWeight="500">
-          Errors from chosen date: ×{Math.pow(10, errorCelAfter.slope).toFixed(2)}/wk
-        </text>
-      )}
-      {errorCelBefore && (
-        <text x="10" y="74" fontSize="12" fill="#EF4444" fontWeight="500">
-          Error before chosen date: ×{Math.pow(10, errorCelBefore.slope).toFixed(2)}/wk
-        </text>
-      )}
-    </>
-  ) : (
-    <>
-      {correctCelAfter && (
-        <text x="10" y="20" fontSize="12" fill="#3B82F6" fontWeight="500">
-          Overall correct celeration: ×{Math.pow(10, correctCelAfter.slope).toFixed(2)}/wk
-        </text>
-      )}
-      {errorCelAfter && (
-        <text x="10" y="38" fontSize="12" fill="#EF4444" fontWeight="500">
-          Overall error celeration ×{Math.pow(10, errorCelAfter.slope).toFixed(2)}/wk
-        </text>
-      )}
-    </>
-  )}
-</g>
+                                    <g transform={`translate(${startX + chartWidth - 210}, ${startY + 340})`}>
+                                        <rect x="0" y="0" width="200" height="70" fill="white" stroke="#E5E7EB" strokeWidth="1" rx="8" />
+                                    {correctCeleration && (
+                                     <text x="10" y="20" fontSize="12" fill="#3B82F6" fontWeight="500">
+                                             Correct celeration: ×{Math.pow(10, correctCeleration.slope).toFixed(2)}/week
+                                     </text>
+                                    )}
+                                        {errorCeleration && (
+                                     <text x="10" y="38" fontSize="12" fill="#EF4444" fontWeight="500">
+                                         Error celeration: ×{Math.pow(10, errorCeleration.slope).toFixed(2)}/week
+                                     </text>
+                                     )}
+                                     <text x="10" y="56" fontSize="12" fill="#111827" fontWeight="500">
+                                     Next timing target: {nextTarget ? nextTarget.toFixed(1) : '—'}/min
+                                     </text>
+                                    </g>
 
                                   </g>
                                 );
@@ -1187,35 +1071,16 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
     return { slope, intercept };
   };
 
-  const startT = fromDate ? Date.parse(fromDate + 'T00:00:00Z') : NaN;
-const hasStart = Number.isFinite(startT);
-const preData  = hasStart ? chartData.filter(d => d.t <  startT) : [];
-const postData = hasStart ? chartData.filter(d => d.t >= startT) : chartData;
+  const correctCeleration = calc(chartData);
+  const errorCeleration   = calc(chartData, true);
 
-// ⛔ Guard: need at least 3 points to give advice
-const MIN_ADVICE_POINTS = 3;
-if (postData.length < MIN_ADVICE_POINTS) {
-  return (
-    <div className="mt-4 p-4 bg-white border border-gray-200 rounded text-gray-700">
-      Insufficient data to provide data information about celeration trends
-    </div>
-  );
-}
-
-const correctCeleration = calc(postData);
-const errorCeleration   = calc(postData, true);
-
-const { picture, tips } = getPTAdviceForApp({
-  chartData: postData,              // ← advice from the selected date onwards
-  correctCeleration,
-  errorCeleration,
-  aimFluency: 25,
-  aimError: 1,
-});
-
-if (hasStart && postData.length < 2) {
-  tips.unshift("Not enough data after the selected date to estimate celeration.");
-}
+  const { picture, tips } = getPTAdviceForApp({
+    chartData,
+    correctCeleration,
+    errorCeleration,
+    aimFluency: 25,
+    aimError: 1,
+  });
 
   if (!tips.length) return null;
   return (
@@ -1615,4 +1480,3 @@ const trend =
     </div>
   );
 }
-

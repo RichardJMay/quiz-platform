@@ -12,6 +12,7 @@ interface QuizData {
   optionD: string
   correctAnswer: string
   explanation: string
+  hint?: string | null
 }
 
 export default function ExcelUpload() {
@@ -40,7 +41,13 @@ export default function ExcelUpload() {
             optionC: (row['Option C'] || row.optionC || row.C || '') as string,
             optionD: (row['Option D'] || row.optionD || row.D || '') as string,
             correctAnswer: (row['Correct Answer'] || row.correctAnswer || row.Answer || '') as string,
-            explanation: (row.Explanation || row.explanation || '') as string
+            explanation: (row.Explanation || row.explanation || '') as string,
+            // NEW: pick up Hint if present; normalize empty to null
+            hint: (() => {
+              const h = (row.Hint ?? row.hint ?? '') as string
+              const trimmed = (h || '').toString().trim()
+              return trimmed.length ? trimmed : null
+            })(),
           }))
 
           resolve(quizData)
@@ -65,15 +72,21 @@ export default function ExcelUpload() {
     if (quizError) throw quizError
 
     // Process each question
-    for (const questionData of quizData) {
-      // Insert question
+    for (const [idx, questionData] of quizData.entries()) {
+      const correct = String(questionData.correctAnswer || '').trim().toUpperCase()
+      if (!['A', 'B', 'C', 'D'].includes(correct)) {
+        throw new Error(`Row ${idx + 2}: Correct Answer must be A, B, C, or D (got "${questionData.correctAnswer}")`)
+      }
+
+      // Insert question (includes hint)
       const { data: question, error: questionError } = await supabase
         .from('questions')
         .insert([{
           quiz_id: quiz.id,
-          question_text: questionData.question,
-          correct_answer: questionData.correctAnswer.toUpperCase(),
-          explanation: questionData.explanation
+          question_text: (questionData.question || '').toString().trim(),
+          correct_answer: correct,
+          explanation: (questionData.explanation || '').toString().trim(),
+          hint: questionData.hint ?? null, // <-- NEW
         }])
         .select()
         .single()
@@ -86,7 +99,7 @@ export default function ExcelUpload() {
         { option_letter: 'B', option_text: questionData.optionB },
         { option_letter: 'C', option_text: questionData.optionC },
         { option_letter: 'D', option_text: questionData.optionD }
-      ]
+      ].map(o => ({ ...o, option_text: (o.option_text || '').toString().trim() }))
 
       const { error: optionsError } = await supabase
         .from('answer_options')
@@ -135,17 +148,6 @@ export default function ExcelUpload() {
       
     } catch (error) {
       console.error('Upload error details:', error)
-      console.error('Error type:', typeof error)
-      console.error('Error constructor:', error?.constructor?.name)
-      
-      if (error && typeof error === 'object') {
-        console.error('Error keys:', Object.keys(error))
-        console.error('Error message:', (error as Record<string, unknown>).message)
-        console.error('Error details:', (error as Record<string, unknown>).details)
-        console.error('Error hint:', (error as Record<string, unknown>).hint)
-        console.error('Error code:', (error as Record<string, unknown>).code)
-      }
-      
       setMessage(`❌ Error: ${error instanceof Error ? error.message : JSON.stringify(error) || 'Upload failed'}`)
     } finally {
       setLoading(false)
@@ -199,8 +201,9 @@ export default function ExcelUpload() {
       <div className="mt-4 text-sm text-gray-600">
         <p><strong>Excel format expected:</strong></p>
         <ul className="list-disc list-inside mt-1">
-          <li>Column headers: Question, Option A, Option B, Option C, Option D, Correct Answer, Explanation</li>
-          <li>Correct Answer should be A, B, C, or D</li>
+          <li>Column headers: <code>Question</code>, <code>Option A</code>, <code>Option B</code>, <code>Option C</code>, <code>Option D</code>, <code>Correct Answer</code>, <code>Explanation</code>, <code>Hint</code> (optional)</li>
+          <li><code>Correct Answer</code> should be A, B, C, or D</li>
+          <li><code>Hint</code> can be blank; when blank the hint button is hidden</li>
         </ul>
       </div>
     </div>

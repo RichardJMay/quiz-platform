@@ -361,6 +361,7 @@ function CategoryPageContent() {
                         price={quiz.price}
                         title={quiz.title}
                         className="w-full"
+                        onAuthRequired={() => handleAuthModalOpen('register')}
                       />
                     )}
                   </div>

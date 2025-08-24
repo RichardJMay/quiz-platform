@@ -115,7 +115,7 @@ const loadPurchasedQuizzes = async () => {
       const result = await executeAuthQuery(async () => {
         return await supabase
           .from('purchases')
-          .select('quiz_id, purchased_at')
+          .select('quiz_id, purchased_at, quizzes:quizzes!purchases_quiz_id_fkey ( id, title, description )')
           .eq('user_id', user.id)
           .eq('status', 'completed')
           .order('purchased_at', { ascending: false })
@@ -127,9 +127,10 @@ const loadPurchasedQuizzes = async () => {
         console.error('Error loading purchased quizzes:', result.error)
         setPurchasedQuizzes([])
       } else {
-        const typedData = (result.data || []).map((item: { quiz_id: string; purchased_at: string }) => ({
-          ...item,
-          quizzes: null
+        const typedData = (result.data || []).map((item: any) => ({
+        quiz_id: item.quiz_id,
+        purchased_at: item.purchased_at,
+        quizzes: item.quizzes // Keep the fetched quiz details
         }))
         setPurchasedQuizzes(typedData)
       }
@@ -296,7 +297,7 @@ const loadPurchasedQuizzes = async () => {
                   </span>
                 </h2>
                 <p className="text-xl sm:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto lg:mx-0 leading-relaxed">
-                  Master your BCBA prep with a personalised learning platform — build fluency, measure progress, connect with peers, and join weekly live drop-in sessions.
+                  Master your BCBA prep with a personalised learning platform — build fluency in core skills and conceptual understanding, measure progress, and join weekly live drop-in sessions.
                 </p>
                 
                 {!user && (
@@ -332,7 +333,7 @@ const loadPurchasedQuizzes = async () => {
                   <p className="text-gray-700 font-medium mb-3">Founder and Head of Learning at optibl</p>
                   <p className="text-gray-700 font-medium mb-3">Associate Professor of Behaviour Analysis</p>
                   <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                    &ldquo;The opitbl BCBA exam preparation will help you achieve real mastery of the task list. Using the science of learning to teach the science of learning!&rdquo;
+                    &ldquo;opitbl will help you achieve real mastery of behaviour analytic concepts. The program applies learning science to help you achieve expertise in the science of learning!&rdquo;
                   </p>
                   <a
                     href="https://richardjmay.github.io/"
@@ -356,7 +357,7 @@ const loadPurchasedQuizzes = async () => {
            <div className="text-center mb-12 mt-8">
               <h2 className="text-3xl font-bold text-gray-900 mb-4">What is optibl?</h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                optibl is a mastery engine — using the science of learning to keep you in the sweet spot for fast, lasting progress
+                optibl is an accelerated learning platform. It has been designed to keep you in the sweet spot for fast, lasting progress.
               </p>
             </div>
             <div className="grid md:grid-cols-3 gap-8">
@@ -373,7 +374,7 @@ const loadPurchasedQuizzes = async () => {
                   <span className="text-white text-2xl">📊</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Progress Analytics</h3>
-                <p className="text-gray-600">Placement tests, performance metrics and data analysis designed to boost your progress and identify areas for improvement</p>
+                <p className="text-gray-600">optibl uses data analytics and precision teaching principles to provide individualised advice to optimise learning</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
@@ -381,7 +382,7 @@ const loadPurchasedQuizzes = async () => {
                   <span className="text-white text-2xl">🎯</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Weekly Live Drop-In Sessions</h3>
-                <p className="text-gray-600">A unique opportunity to join Dr May live for interactive Q&A and study guidance every week</p>
+                <p className="text-gray-600">A unique opportunity to join Dr May live for study guidance every week</p>
               </div>
             </div>
           </section>
@@ -451,9 +452,9 @@ const loadPurchasedQuizzes = async () => {
           <>
             <section>
               <div className="text-center mb-12">
-                <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Choose Your optibl Learning Path</h2>
+                <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">optibl Modules</h2>
                 <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                  Expert-designed categories covering all aspects of BCBA exam preparation with fluency-based learning
+                  Behaviour Analysis Learning Modules
                 </p>
                 {!user && (
                   <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
