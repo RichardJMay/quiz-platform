@@ -1,11 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { supabasePublic } from '@/lib/supabase' // public client for probes
 import { useAuth } from '../../contexts/AuthContext'
 import ExcelUpload from '@/components/ExcelUpload'
+
+const ADMIN_EMAILS = [
+  'richiemay1@hotmail.com',
+  'richiemay1979@gmail.com',
+]
 
 export default function AdminPage() {
   const [connected, setConnected] = useState(false)
@@ -15,64 +20,81 @@ export default function AdminPage() {
   const { user } = useAuth()
   const router = useRouter()
 
-  // List of authorized admin emails
-  const ADMIN_EMAILS = [
-    'richiemay1@hotmail.com', // Replace with your actual email
-    'richiemay1979@gmail.com', // Example - replace with your real email
-  ]
+  // lifecycle guards
+  const mountedRef = useRef(true)
+  const authCheckRef = useRef(false)
+  const connCheckRef = useRef(false)
 
   useEffect(() => {
-    async function checkAuthorization() {
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  // AUTHORIZATION CHECK — narrow dep to user?.id, dedup, safe setState
+  useEffect(() => {
+    if (authCheckRef.current) return
+    authCheckRef.current = true
+
+    ;(async () => {
       try {
-        if (!user) {
-          console.log('No user logged in')
-          setAuthLoading(false)
+        if (!user?.id) {
+          if (mountedRef.current) {
+            setIsAuthorized(false)
+            setAuthLoading(false)
+          }
           return
         }
 
-        const userEmail = user.email?.toLowerCase()
-        console.log('Checking authorization for:', userEmail)
-        
-        if (userEmail && ADMIN_EMAILS.includes(userEmail)) {
-          setIsAuthorized(true)
-          console.log('User authorized as admin')
-        } else {
-          console.log('User not authorized as admin')
-          setIsAuthorized(false)
-        }
-      } catch (error) {
-        console.error('Authorization check failed:', error)
-        setIsAuthorized(false)
-      } finally {
-        setAuthLoading(false)
-      }
-    }
-
-    checkAuthorization()
-  }, [user])
-
-  useEffect(() => {
-    async function testConnection() {
-      if (!isAuthorized) return
-      
-      try {
-        const { data, error } = await supabase.from('quizzes').select('*').limit(1)
-        console.log('Connection test:', { data, error })
-        setConnected(true)
+        const ok = ADMIN_EMAILS.includes((user.email || '').toLowerCase())
+        if (mountedRef.current) setIsAuthorized(ok)
       } catch (err) {
+        console.error('Authorization check failed:', err)
+        if (mountedRef.current) setIsAuthorized(false)
+      } finally {
+        if (mountedRef.current) setAuthLoading(false)
+        authCheckRef.current = false
+      }
+    })()
+  }, [user?.id])
+
+  // CONNECTION PROBE — public client, abort/timeout, dedup, safe setState
+  useEffect(() => {
+    if (authLoading || !isAuthorized) return
+    if (connCheckRef.current) return
+    connCheckRef.current = true
+
+    const ac = new AbortController()
+    const timeout = setTimeout(() => ac.abort('timeout'), 8000)
+
+    ;(async () => {
+      try {
+        const { error } = await supabasePublic
+          .from('quizzes')
+          .select('id')
+          .limit(1)
+          .abortSignal(ac.signal)
+
+        if (!mountedRef.current) return
+        setConnected(!error)
+      } catch (err) {
+        if (!mountedRef.current) return
         console.error('Connection failed:', err)
         setConnected(false)
       } finally {
-        setLoading(false)
+        clearTimeout(timeout)
+        if (mountedRef.current) setLoading(false)
+        connCheckRef.current = false
       }
-    }
+    })()
 
-    if (!authLoading && isAuthorized) {
-      testConnection()
+    return () => {
+      clearTimeout(timeout)
+      ac.abort()
     }
-  }, [isAuthorized, authLoading])
+  }, [authLoading, isAuthorized])
 
-  // Show loading while checking authentication
+  // --- UI states ---
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
@@ -84,16 +106,13 @@ export default function AdminPage() {
     )
   }
 
-  // Redirect if not logged in
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
         <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-gray-200/50 max-w-md w-full mx-4 text-center">
           <div className="text-6xl mb-4">🔒</div>
           <h1 className="text-3xl font-bold text-gray-900 mb-4">Access Restricted</h1>
-          <p className="text-gray-600 mb-6">
-            You must be logged in to access the admin area.
-          </p>
+          <p className="text-gray-600 mb-6">You must be logged in to access the admin area.</p>
           <div className="flex gap-4 justify-center">
             <button
               onClick={() => router.push('/')}
@@ -107,19 +126,14 @@ export default function AdminPage() {
     )
   }
 
-  // Block unauthorized users
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
         <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-gray-200/50 max-w-md w-full mx-4 text-center">
           <div className="text-6xl mb-4">⛔</div>
           <h1 className="text-3xl font-bold text-gray-900 mb-4">Admin Access Required</h1>
-          <p className="text-gray-600 mb-4">
-            Sorry, you don't have permission to access this area.
-          </p>
-          <p className="text-sm text-gray-500 mb-6">
-            Logged in as: {user.email}
-          </p>
+          <p className="text-gray-600 mb-4">Sorry, you don't have permission to access this area.</p>
+          <p className="text-sm text-gray-500 mb-6">Logged in as: {user.email}</p>
           <div className="flex gap-4 justify-center">
             <button
               onClick={() => router.push('/')}
@@ -133,7 +147,6 @@ export default function AdminPage() {
     )
   }
 
-  // Show loading while testing database connection
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
@@ -145,18 +158,13 @@ export default function AdminPage() {
     )
   }
 
-  // Show database connection error
   if (!connected) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
         <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-gray-200/50 max-w-md w-full mx-4 text-center">
           <h1 className="text-3xl font-bold text-gray-900 mb-4">Dr May's Admin Panel</h1>
-          <div className="text-red-600 text-xl mb-4">
-            ❌ Database connection failed
-          </div>
-          <p className="text-gray-600 mb-6">
-            Please check your Supabase configuration.
-          </p>
+          <div className="text-red-600 text-xl mb-4">❌ Database connection failed</div>
+          <p className="text-gray-600 mb-6">Please check your Supabase configuration.</p>
           <button
             onClick={() => window.location.reload()}
             className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200"
@@ -168,7 +176,7 @@ export default function AdminPage() {
     )
   }
 
-  // Main admin interface - only shown to authorized users
+  // --- Main Admin UI ---
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 py-8">
       <div className="container mx-auto px-4">
@@ -176,17 +184,13 @@ export default function AdminPage() {
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
             Dr May's Admin Panel
           </h1>
-          <p className="text-gray-600">
-            Welcome, Dr May! Manage your quiz platform here.
-          </p>
+          <p className="text-gray-600">Welcome, Dr May! Manage your quiz platform here.</p>
         </div>
-        
+
         <div className="max-w-4xl mx-auto">
           <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-gray-200/50 mb-8">
             <div className="text-center">
-              <div className="text-green-600 text-lg mb-2">
-                ✅ Database connected successfully
-              </div>
+              <div className="text-green-600 text-lg mb-2">✅ Database connected successfully</div>
               <p className="text-gray-600 mb-4">
                 Upload your Excel file with quiz questions and set pricing.
               </p>

@@ -83,6 +83,7 @@ useEffect(() => {
         quizzes(count)
       `)
       .eq('is_active', true)
+      .eq('quizzes.is_listed', true) 
       .order('display_order')
       .abortSignal(ac.signal);
 
@@ -211,7 +212,7 @@ const loadPurchasedQuizzes = async () => {
               <div className="relative min-w-0 flex-shrink-0">
                 <Image
                   src="/images/logo-header.png"
-                  alt="Dr May's Adaptive Learning Analytics"
+                  alt="Optibl Learning Analytics"
                   width={320}
                   height={80}
                   className="h-10 w-auto sm:h-14 md:h-16 lg:h-20 max-w-none"
@@ -280,7 +281,7 @@ const loadPurchasedQuizzes = async () => {
                   <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-gray-200/50">
                     <Image
                       src="/images/logo-header.png"
-                      alt="Dr May's Adaptive Learning Analytics"
+                      alt="Optibl Learning Analytics"
                       width={480}
                       height={120}
                       className="w-[220px] h-auto sm:w-[320px] md:w-[480px]"
@@ -291,13 +292,13 @@ const loadPurchasedQuizzes = async () => {
                 </div>
                 
                 <h2 className="text-4xl sm:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-                  Personalised Learning Pathways
+                  Personalised Pathways
                   <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent block sm:inline">
-                    {' '}for BCBA Exam Success
+                    {' '}for Learning Mastery
                   </span>
                 </h2>
                 <p className="text-xl sm:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto lg:mx-0 leading-relaxed">
-                  Master your BCBA prep with a personalised learning platform — build fluency in core skills and conceptual understanding, measure progress, and join weekly live drop-in sessions.
+                  Master behaviour analytic concepts with a personalised learning platform — build fluency in core skills and conceptual understanding and track your progress.
                 </p>
                 
                 {!user && (
@@ -308,7 +309,7 @@ const loadPurchasedQuizzes = async () => {
                     >
                       🚀 Start Learning
                     </button>
-                    <p className="text-gray-500">No credit card required</p>
+                    <p className="text-gray-500"></p>
                   </div>
                 )}
               </div>
@@ -330,10 +331,10 @@ const loadPurchasedQuizzes = async () => {
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">Dr Rich May</h3>
                   <p className="text-blue-600 font-semibold mb-1">Dr Richard May PhD BCBA-D</p>
-                  <p className="text-gray-700 font-medium mb-3">Founder and Head of Learning at optibl</p>
+                  <p className="text-gray-700 font-medium mb-3"></p>
                   <p className="text-gray-700 font-medium mb-3">Associate Professor of Behaviour Analysis</p>
                   <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                    &ldquo;opitbl will help you achieve real mastery of behaviour analytic concepts. The program applies learning science to help you achieve expertise in the science of learning!&rdquo;
+                    &ldquo;opitbl has been designed help you achieve real mastery of behaviour analytic concepts. The program applies learning science to help you achieve expertise in the science of learning!&rdquo;
                   </p>
                   <a
                     href="https://richardjmay.github.io/"
@@ -357,7 +358,7 @@ const loadPurchasedQuizzes = async () => {
            <div className="text-center mb-12 mt-8">
               <h2 className="text-3xl font-bold text-gray-900 mb-4">What is optibl?</h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                optibl is an accelerated learning platform. It has been designed to keep you in the sweet spot for fast, lasting progress.
+                optibl is a personalised learning platform that has been specifically designed to optimse the learning of new conceptual knowledge. Master skills that stick.
               </p>
             </div>
             <div className="grid md:grid-cols-3 gap-8">
@@ -366,7 +367,7 @@ const loadPurchasedQuizzes = async () => {
                   <span className="text-white text-2xl">⚡</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Science of learning</h3>
-                <p className="text-gray-600">Expertly sequenced and fluency-based assessment to help you build speed, accuracy, and long-term retention</p>
+                <p className="text-gray-600">The modules are carefully sequenced to help you build accuracy, fluency and long-term retention</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
@@ -374,15 +375,15 @@ const loadPurchasedQuizzes = async () => {
                   <span className="text-white text-2xl">📊</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 mb-3">Progress Analytics</h3>
-                <p className="text-gray-600">optibl uses data analytics and precision teaching principles to provide individualised advice to optimise learning</p>
+                <p className="text-gray-600">Precision teaching analytics for optimised learning outcomes </p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
                 <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl flex items-center justify-center mb-4">
                   <span className="text-white text-2xl">🎯</span>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Weekly Live Drop-In Sessions</h3>
-                <p className="text-gray-600">A unique opportunity to join Dr May live for study guidance every week</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">Chart your Progress</h3>
+                <p className="text-gray-600">Interactive celeration charts for data-informed decision-making</p>
               </div>
             </div>
           </section>
@@ -402,7 +403,7 @@ const loadPurchasedQuizzes = async () => {
               <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
                 <div className="text-6xl mb-4">🎓</div>
                 <h3 className="text-2xl font-semibold text-gray-700 mb-2">Ready to Start Learning with optibl?</h3>
-                <p className="text-gray-600 mb-6">Purchase your first quiz below to unlock personalized progress tracking</p>
+                <p className="text-gray-600 mb-6"></p>
                 <button
                   onClick={() => setShowMyQuizzes(false)}
                   className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
@@ -459,7 +460,7 @@ const loadPurchasedQuizzes = async () => {
                 {!user && (
                   <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
                     <p className="text-blue-700 font-medium">
-                      💡 Create a free account to track your progress and access purchased content anytime!
+                      💡 Create an account to track your progress
                     </p>
                   </div>
                 )}

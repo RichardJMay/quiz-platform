@@ -9,8 +9,8 @@ import { supabase } from '@/lib/supabase';
 type LeaderRow = {
   quiz_id: string;
   title: string;
-  yourBest: number;
-  globalBest: number;
+  yourBestRaw: number;   // keep raw for comparison
+  globalBestRaw: number; // keep raw for comparison
 };
 
 export default function LeaderboardPage() {
@@ -25,7 +25,7 @@ export default function LeaderboardPage() {
     (async () => {
       setLoading(true);
       try {
-        // Your attempts (to find quizzes you've actually played)
+        // 1) Your attempts (to limit leaderboard to quizzes you've actually played)
         const { data: attempts, error } = await supabase
           .from('quiz_attempts')
           .select(`
@@ -37,13 +37,13 @@ export default function LeaderboardPage() {
 
         if (error) throw error;
 
-        // Your best per quiz
+        // 2) Your best per quiz
         const yourBest = new Map<string, { title: string; best: number }>();
-        (attempts || []).forEach(a => {
+        (attempts || []).forEach((a: any) => {
           const prev = yourBest.get(a.quiz_id)?.best ?? -Infinity;
           if (a.fluency_rate > prev) {
             yourBest.set(a.quiz_id, {
-              title: (a as any).quizzes?.title ?? 'Untitled quiz',
+              title: a.quizzes?.title ?? 'Untitled quiz',
               best: a.fluency_rate,
             });
           }
@@ -55,37 +55,40 @@ export default function LeaderboardPage() {
           return;
         }
 
-        // Global best per those quizzes (simple & robust: compute on client)
-        const { data: allForThese, error: gErr } = await supabase
-          .from('quiz_attempts')
-          .select('quiz_id, fluency_rate')
-          .in('quiz_id', quizIds);
-
+        // 3) Global bests via RPC (bypasses RLS, returns only aggregates)
+        const { data: gbRows, error: gErr } = await supabase.rpc('get_global_bests', {
+          quiz_ids: quizIds,
+        });
         if (gErr) throw gErr;
 
-        const globalBest = new Map<string, number>();
-        (allForThese || []).forEach(r => {
-          const prev = globalBest.get(r.quiz_id) ?? -Infinity;
-          if (r.fluency_rate > prev) globalBest.set(r.quiz_id, r.fluency_rate);
+        const globalBestMap = new Map<string, number>();
+        (gbRows || []).forEach((r: any) => {
+          globalBestMap.set(r.quiz_id, Number(r.global_best) || 0);
         });
 
-        const composed: LeaderRow[] = quizIds
-          .map(qid => ({
-            quiz_id: qid,
-            title: yourBest.get(qid)!.title,
-            yourBest: Number(yourBest.get(qid)!.best.toFixed(1)),
-            globalBest: Number((globalBest.get(qid) ?? yourBest.get(qid)!.best).toFixed(1)),
-          }))
+        // 4) Compose rows (keep raw numbers for logic; format in render)
+        const composed = quizIds
+          .map(qid => {
+            const yourBestRaw = yourBest.get(qid)!.best;
+            const globalBestRaw = globalBestMap.get(qid) ?? yourBestRaw; // fallback shouldn't happen, but safe
+            return {
+              quiz_id: qid,
+              title: yourBest.get(qid)!.title,
+              yourBestRaw,
+              globalBestRaw,
+            };
+          })
           .sort((a, b) => a.title.localeCompare(b.title));
 
         setRows(composed);
       } catch (e) {
         console.error('Leaderboard error:', e);
+        setRows([]);
       } finally {
         setLoading(false);
       }
     })();
-  }, [user, router]);
+  }, [user?.id, router]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -94,16 +97,10 @@ export default function LeaderboardPage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Leaderboard</h1>
           <div className="flex gap-2">
-            <Link
-              href="/progress"
-              className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-            >
+            <Link href="/progress" className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
               Back to Progress
             </Link>
-            <Link
-              href="/"
-              className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
-            >
+            <Link href="/" className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors">
               Home
             </Link>
           </div>
@@ -133,12 +130,12 @@ export default function LeaderboardPage() {
                 </thead>
                 <tbody>
                   {rows.map(row => {
-                    const youLead = row.yourBest >= row.globalBest;
+                    const youLead = row.yourBestRaw >= row.globalBestRaw; // compare raw numbers
                     return (
                       <tr key={row.quiz_id} className="border-b last:border-0">
                         <td className="py-2 pr-4 font-medium text-gray-900">{row.title}</td>
-                        <td className="py-2 px-4">{row.yourBest.toFixed(1)}</td>
-                        <td className="py-2 px-4">{row.globalBest.toFixed(1)}</td>
+                        <td className="py-2 px-4">{row.yourBestRaw.toFixed(1)}</td>
+                        <td className="py-2 px-4">{row.globalBestRaw.toFixed(1)}</td>
                         <td className="py-2 pl-4">
                           {youLead ? (
                             <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
@@ -146,7 +143,7 @@ export default function LeaderboardPage() {
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-gray-700 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
-                              🎯 Beat {row.globalBest.toFixed(1)}
+                              🎯 Beat {row.globalBestRaw.toFixed(1)}
                             </span>
                           )}
                         </td>

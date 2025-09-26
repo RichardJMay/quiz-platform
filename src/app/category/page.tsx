@@ -16,6 +16,7 @@ interface Quiz {
   price: number
   is_free: boolean
   category_id: string
+  is_listed?: boolean // optional; fetched but not required elsewhere
 }
 
 interface Category {
@@ -73,8 +74,9 @@ function CategoryPageContent() {
   const loadCategoryQuizzes = async () => {
     const { data, error } = await supabase
       .from('quizzes')
-      .select('id, title, description, price, is_free, category_id')
+      .select('id, title, description, price, is_free, category_id, is_listed')
       .eq('category_id', categoryId)
+      .eq('is_listed', true) // ← ONLY show listed quizzes
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -102,21 +104,17 @@ function CategoryPageContent() {
   }
 
   const startQuiz = (quizId: string) => {
-  if (navigatingRef.current) {
-    console.log('Already navigating to quiz, ignoring...')
-    return
+    if (navigatingRef.current) {
+      console.log('Already navigating to quiz, ignoring...')
+      return
+    }
+    navigatingRef.current = true
+    console.log('Navigating to quiz:', quizId)
+    router.push(`/quiz?id=${quizId}`)
+    setTimeout(() => {
+      navigatingRef.current = false
+    }, 2000)
   }
-  
-  navigatingRef.current = true
-  console.log('Navigating to quiz:', quizId)
-  
-  router.push(`/quiz?id=${quizId}`)
-  
-  // Reset after navigation completes
-  setTimeout(() => {
-    navigatingRef.current = false
-  }, 2000)
-}
 
   const handleAuthModalOpen = (mode: 'login' | 'register' | 'reset') => {
     setAuthMode(mode)
@@ -131,11 +129,8 @@ function CategoryPageContent() {
       try {
         localStorage.clear()
         sessionStorage.clear()
-        
-        document.cookie.split(";").forEach((c) => {
-          document.cookie = c
-            .replace(/^ +/, "")
-            .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+        document.cookie.split(';').forEach((c) => {
+          document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`)
         })
       } catch (storageError) {
         console.log('Storage clear error:', storageError)
@@ -144,13 +139,12 @@ function CategoryPageContent() {
       setTimeout(() => {
         window.location.replace('/')
       }, 200)
-      
     } catch (error) {
       console.error('Sign out error:', error)
       try {
         localStorage.clear()
         sessionStorage.clear()
-      } catch (e) {}
+      } catch {}
       window.location.replace('/')
     }
   }
@@ -241,7 +235,7 @@ function CategoryPageContent() {
         </div>
       </header>
 
-      {/* Breadcrumb Navigation */}
+      {/* Breadcrumb */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <button
           onClick={() => router.push('/')}
@@ -268,7 +262,6 @@ function CategoryPageContent() {
                   {category.description}
                 </p>
                 
-                {/* Category Stats */}
                 <div className="flex flex-wrap gap-6 text-sm text-gray-600">
                   <div className="flex items-center">
                     <Clock className="w-4 h-4 mr-2 text-blue-600" />
@@ -353,7 +346,7 @@ function CategoryPageContent() {
                         onClick={() => startQuiz(quiz.id)}
                         className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                       >
-                        🆓 Start Dr May's Free Quiz
+                        Go to the Quiz
                       </button>
                     ) : (
                       <PaymentButton
@@ -394,35 +387,12 @@ function CategoryPageContent() {
               />
               <span className="text-gray-600">© 2025 optibl</span>
             </div>
-            // Replace the footer links in category/page.tsx
-<div className="flex space-x-6 text-sm">
-  <button 
-    onClick={() => router.push('/about')}
-    className="text-gray-600 hover:text-blue-600 transition-colors"
-  >
-    About optibl
-  </button>
-  <button 
-    onClick={() => router.push('/privacy')}
-    className="text-gray-600 hover:text-blue-600 transition-colors"
-  >
-    Privacy Policy
-  </button>
-  <button 
-    onClick={() => router.push('/terms')}
-    className="text-gray-600 hover:text-blue-600 transition-colors"
-  >
-    Terms of Service
-  </button>
-  <a 
-    href="https://richardjmay.github.io/" 
-    target="_blank" 
-    rel="noopener noreferrer"
-    className="text-gray-600 hover:text-blue-600 transition-colors"
-  >
-    About Dr May
-  </a>
-</div>
+            <div className="flex space-x-6 text-sm">
+              <button onClick={() => router.push('/about')} className="text-gray-600 hover:text-blue-600 transition-colors">About optibl</button>
+              <button onClick={() => router.push('/privacy')} className="text-gray-600 hover:text-blue-600 transition-colors">Privacy Policy</button>
+              <button onClick={() => router.push('/terms')} className="text-gray-600 hover:text-blue-600 transition-colors">Terms of Service</button>
+              <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer" className="text-gray-600 hover:text-blue-600 transition-colors">About Dr May</a>
+            </div>
           </div>
         </div>
       </footer>

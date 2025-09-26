@@ -24,7 +24,7 @@ interface Question {
   question_text: string
   correct_answer: string // canonical letter from sheet, e.g., "B"
   explanation: string    // letter-free prose
-  hint?: string
+  hint?: string | null
   answer_options: AnswerOption[]
 }
 
@@ -38,6 +38,10 @@ function shuffle<T>(arr: T[]): T[] {
   }
   return a
 }
+
+// Idle timeout (5 minutes total; warn at 4.5 minutes)
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;     // 300,000 ms
+const IDLE_WARNING_MS = 4.5 * 60 * 1000;   // 270,000 ms
 
 export default function QuizTaker() {
   const searchParams = useSearchParams()
@@ -61,6 +65,12 @@ export default function QuizTaker() {
   const [checkingAccess, setCheckingAccess] = useState(false)
   const checkingAccessPromise = useRef<Promise<boolean> | null>(null)
 
+  // ===== Idle tracking state/refs =====
+  const [idleWarning, setIdleWarning] = useState(false)
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const idleWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastActivityRef = useRef<number>(Date.now())
+
   // Load available quizzes or specific quiz
   useEffect(() => {
     if (quizId) {
@@ -68,6 +78,7 @@ export default function QuizTaker() {
     } else {
       loadQuizzes()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quizId])
 
   // Re-check access after login if needed
@@ -79,6 +90,7 @@ export default function QuizTaker() {
         }
       })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]) // Only trigger on user ID changes
 
   const loadQuizzes = async () => {
@@ -252,18 +264,33 @@ export default function QuizTaker() {
       setScore(0)
       setQuizCompleted(false)
       setStartTime(new Date())
+
+      // kick off idle timers
+      lastActivityRef.current = Date.now()
+      startIdleTimers()
     }
     setLoading(false)
   }
 
-  // ---------- Derived per-view state ----------
+  // ---------- Derived per-view state (safe hooks at top level) ----------
   const currentQuestion: Question | undefined = questions[currentQuestionIndex]
 
-  const shuffledOptions: AnswerOption[] = useMemo(
-    () => (currentQuestion ? shuffle(currentQuestion.answer_options) : []),
+  // Only include options that have text
+  const presentOptions: AnswerOption[] = useMemo(
+    () => (currentQuestion
+      ? currentQuestion.answer_options.filter(o => (o.option_text ?? '').trim().length > 0)
+      : []),
     [currentQuestion?.id]
   )
 
+  // Shuffled options for the current question (by view)
+  const shuffledOptions: AnswerOption[] = useMemo(
+    () => shuffle(presentOptions),
+    // depend only on question id so the order is stable while on this question
+    [currentQuestion?.id]
+  )
+
+  // Map from canonical -> display letter after shuffle
   const canonicalToDisplay: Record<string, string> = useMemo(() => {
     const m: Record<string, string> = {}
     shuffledOptions.forEach((opt, idx) => {
@@ -272,7 +299,69 @@ export default function QuizTaker() {
     return m
   }, [shuffledOptions])
 
-  // -------------------------------------------
+  // ===== Idle helpers =====
+  const clearIdleTimers = () => {
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null }
+    if (idleWarnTimerRef.current) { clearTimeout(idleWarnTimerRef.current); idleWarnTimerRef.current = null }
+  }
+
+  const startIdleTimers = () => {
+    clearIdleTimers()
+    setIdleWarning(false)
+    idleWarnTimerRef.current = setTimeout(() => setIdleWarning(true), IDLE_WARNING_MS)
+    idleTimerRef.current = setTimeout(() => {
+      finalizeTimedOutAttempt()
+    }, IDLE_TIMEOUT_MS)
+  }
+
+  const markActivity = () => {
+    lastActivityRef.current = Date.now()
+    startIdleTimers()
+  }
+
+  const finalizeTimedOutAttempt = async () => {
+    clearIdleTimers()
+    if (quizCompleted) return
+    try {
+      await saveQuizAttempt()
+    } finally {
+      setQuizCompleted(true)
+    }
+  }
+
+  // Install global activity listeners only while in a running quiz
+  useEffect(() => {
+    const inQuiz = !!selectedQuiz && questions.length > 0 && !quizCompleted
+    if (!inQuiz) return
+
+    const onAny = () => markActivity()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') markActivity()
+    }
+
+    startIdleTimers()
+
+    window.addEventListener('mousemove', onAny, { passive: true })
+    window.addEventListener('keydown', onAny)
+    window.addEventListener('click', onAny)
+    window.addEventListener('touchstart', onAny, { passive: true })
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.removeEventListener('mousemove', onAny)
+      window.removeEventListener('keydown', onAny)
+      window.removeEventListener('click', onAny)
+      window.removeEventListener('touchstart', onAny)
+      document.removeEventListener('visibilitychange', onVisibility)
+      clearIdleTimers()
+    }
+  }, [selectedQuiz?.id, questions.length, quizCompleted])
+
+  useEffect(() => {
+    if (quizCompleted) clearIdleTimers()
+  }, [quizCompleted])
+
+  // ---------------------------------------------------------------------
 
   const submitAnswer = async () => {
     if (!selectedAnswer) {
@@ -281,8 +370,9 @@ export default function QuizTaker() {
     }
     if (!currentQuestion) return
 
-    const isCorrect = selectedAnswer === currentQuestion.correct_answer
+    markActivity()
 
+    const isCorrect = selectedAnswer === currentQuestion.correct_answer
     if (isCorrect) setScore(prev => prev + 1)
 
     await supabase
@@ -291,15 +381,16 @@ export default function QuizTaker() {
         student_name: studentName,
         question_id: currentQuestion.id,
         selected_answer: selectedAnswer, // canonical letter for offline analysis
-        is_correct: isCorrect,
-        hint_used: hintShown, // <-- STEP E: track if hint was used (ensure column exists)
-        // option_order: shuffledOptions.map(o => o.option_letter) // optional audit trail
+        is_correct: isCorrect
+        // If you add a JSONB column "option_order" you can log the order shown:
+        // option_order: shuffledOptions.map(o => o.option_letter)
       }])
 
     setShowFeedback(true)
   }
 
   const nextQuestion = () => {
+    markActivity()
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1)
       setSelectedAnswer('')
@@ -347,6 +438,7 @@ export default function QuizTaker() {
   }
 
   const resetQuiz = () => {
+    clearIdleTimers()
     setSelectedQuiz(null)
     setQuestions([])
     setCurrentQuestionIndex(0)
@@ -357,6 +449,7 @@ export default function QuizTaker() {
     setStudentName('')
     setStartTime(null)
     setAccessError(null)
+    setIdleWarning(false)
   }
 
   const getCurrentFluencyRate = () => {
@@ -442,7 +535,7 @@ export default function QuizTaker() {
             </div>
 
             <div className="bg-gray-50 rounded-lg p-4 sm:p-6 mb-6">
-              <h3 className="text-lg sm:text-xl font-semibold mb-3 text_gray-900">Performance Analysis</h3>
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 text-gray-900">Performance Analysis</h3>
 
               <div className="relative w-full h-6 sm:h-8 bg-gray-200 rounded-lg overflow-hidden mb-3">
                 <div className="absolute left-0 top-0 w-px h-full bg-gray-400 z-10"></div>
@@ -508,7 +601,7 @@ export default function QuizTaker() {
           {user && <p className="text-center text-gray-700 mb-6">Ready to start, {displayName}?</p>}
 
           <button
-            onClick={() => startQuiz(selectedQuiz)}
+            onClick={() => { markActivity(); startQuiz(selectedQuiz) }}
             className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
           >
             Start Quiz
@@ -532,7 +625,7 @@ export default function QuizTaker() {
       canonicalToDisplay[currentQuestion.correct_answer] ?? currentQuestion.correct_answer
 
     return (
-      <div className="min-h-screen bg-gray-100">
+      <div className="min-h-screen bg-gray-100" onMouseMove={markActivity} onKeyDown={markActivity}>
         {/* Header */}
         <div className="bg-white shadow-sm border-b">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4">
@@ -551,6 +644,19 @@ export default function QuizTaker() {
 
         <div className="max-w-4xl mx-auto p-4 sm:p-6">
           <div className="w-full">
+            {/* Idle warning */}
+            {idleWarning && !quizCompleted && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-800">
+                You’ve been inactive for a while. The quiz will end soon unless you continue.
+                <button
+                  onClick={() => { markActivity(); setIdleWarning(false) }}
+                  className="ml-2 inline-flex items-center rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-700"
+                >
+                  I’m back
+                </button>
+              </div>
+            )}
+
             {/* Progress */}
             <div className="mb-4 sm:mb-6">
               <div className="flex flex-col sm:flex-row justify-between text-sm text-gray-600 mb-2 gap-1 sm:gap-4">
@@ -578,24 +684,18 @@ export default function QuizTaker() {
                 {currentQuestion.question_text}
               </h2>
 
-              {/* STEP D: Hint (only if provided) */}
-              {currentQuestion.hint && (
-                <div className="mb-4 sm:mb-6">
+              {/* Hint button */}
+              {(currentQuestion.hint && currentQuestion.hint.trim().length > 0) && !showFeedback && (
+                <div className="mb-4">
                   <button
-                    type="button"
-                    onClick={() => setHintShown(v => !v)}
-                    className="inline-flex items-center gap-2 bg-amber-500 text-white px-3 py-2 rounded-lg hover:bg-amber-600 transition-colors text-sm"
-                    aria-expanded={hintShown}
-                    aria-controls={`hint-${currentQuestion.id}`}
+                    onClick={() => { setHintShown(v => !v); markActivity() }}
+                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm"
                   >
-                    {hintShown ? 'Hide hint' : 'Show hint'} <span aria-hidden>💡</span>
+                    {hintShown ? 'Hide Hint' : 'Show Hint'}
                   </button>
                   {hintShown && (
-                    <div
-                      id={`hint-${currentQuestion.id}`}
-                      className="mt-3 p-3 sm:p-4 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900"
-                    >
-                      <span className="font-semibold">Hint:</span> {currentQuestion.hint}
+                    <div className="mt-3 text-sm bg-purple-50 border border-purple-200 text-purple-900 rounded p-3">
+                      {currentQuestion.hint}
                     </div>
                   )}
                 </div>
@@ -619,7 +719,7 @@ export default function QuizTaker() {
                         name="answer"
                         value={option.option_letter} // canonical letter
                         checked={selectedAnswer === option.option_letter}
-                        onChange={(e) => setSelectedAnswer(e.target.value)}
+                        onChange={(e) => { setSelectedAnswer(e.target.value); markActivity() }}
                         disabled={showFeedback}
                         className="mr-3 mt-0.5 flex-shrink-0"
                       />
@@ -656,7 +756,7 @@ export default function QuizTaker() {
               <div className="flex justify-center sm:justify-end">
                 {!showFeedback ? (
                   <button
-                    onClick={submitAnswer}
+                    onClick={() => { markActivity(); submitAnswer() }}
                     disabled={!selectedAnswer}
                     className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 sm:py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
                   >
@@ -664,7 +764,7 @@ export default function QuizTaker() {
                   </button>
                 ) : (
                   <button
-                    onClick={nextQuestion}
+                    onClick={() => { markActivity(); nextQuestion() }}
                     className="w-full sm:w-auto bg-green-600 text-white px-6 py-3 sm:py-2 rounded-lg hover:bg-green-700 font-medium"
                   >
                     {currentQuestionIndex < questions.length - 1 ? 'Next Question' : 'Finish Quiz'}

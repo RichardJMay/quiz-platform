@@ -4,14 +4,14 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import * as XLSX from 'xlsx'
 
-interface QuizData {
+type QuizData = {
   question: string
-  optionA: string
-  optionB: string
-  optionC: string
-  optionD: string
+  optionA?: string
+  optionB?: string
+  optionC?: string
+  optionD?: string
   correctAnswer: string
-  explanation: string
+  explanation?: string
   hint?: string | null
 }
 
@@ -20,49 +20,57 @@ export default function ExcelUpload() {
   const [message, setMessage] = useState('')
   const [quizTitle, setQuizTitle] = useState('')
 
+  // --- Helpers ---
+  const clean = (v: unknown) => String(v ?? '').trim()
+  const upper = (v: unknown) => clean(v).toUpperCase()
+  const getFirst = (row: Record<string, unknown>, keys: string[]) =>
+    keys.reduce<string>((acc, k) => (acc !== '' ? acc : clean((row as any)[k])), '')
+
   const processExcelFile = async (file: File) => {
     return new Promise<QuizData[]>((resolve, reject) => {
       const reader = new FileReader()
-      
       reader.onload = (e) => {
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer)
           const workbook = XLSX.read(data, { type: 'array' })
           const sheetName = workbook.SheetNames[0]
           const worksheet = workbook.Sheets[sheetName]
-          const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[]
+          const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet)
 
-          console.log('Raw Excel data:', jsonData)
+          const rows: QuizData[] = jsonRows.map((row) => {
+            const question = getFirst(row, ['Question', 'question', 'Item', 'item'])
+            const optionA = getFirst(row, ['Option A', 'optionA', 'A'])
+            const optionB = getFirst(row, ['Option B', 'optionB', 'B'])
+            const optionC = getFirst(row, ['Option C', 'optionC', 'C'])
+            const optionD = getFirst(row, ['Option D', 'optionD', 'D'])
+            const correctAnswer = getFirst(row, ['Correct Answer', 'correctAnswer', 'Answer', 'answer'])
+            const explanation = getFirst(row, ['Explanation', 'explanation'])
+            const hintRaw = getFirst(row, ['Hint', 'hint'])
 
-          const quizData: QuizData[] = jsonData.map((row) => ({
-            question: (row.Question || row.question || '') as string,
-            optionA: (row['Option A'] || row.optionA || row.A || '') as string,
-            optionB: (row['Option B'] || row.optionB || row.B || '') as string,
-            optionC: (row['Option C'] || row.optionC || row.C || '') as string,
-            optionD: (row['Option D'] || row.optionD || row.D || '') as string,
-            correctAnswer: (row['Correct Answer'] || row.correctAnswer || row.Answer || '') as string,
-            explanation: (row.Explanation || row.explanation || '') as string,
-            // NEW: pick up Hint if present; normalize empty to null
-            hint: (() => {
-              const h = (row.Hint ?? row.hint ?? '') as string
-              const trimmed = (h || '').toString().trim()
-              return trimmed.length ? trimmed : null
-            })(),
-          }))
+            return {
+              question,
+              optionA,
+              optionB,
+              optionC,
+              optionD,
+              correctAnswer,
+              explanation,
+              hint: hintRaw || null,
+            }
+          })
 
-          resolve(quizData)
-        } catch (error) {
-          reject(error)
+          resolve(rows)
+        } catch (err) {
+          reject(err)
         }
       }
-
       reader.onerror = () => reject(new Error('File reading failed'))
       reader.readAsArrayBuffer(file)
     })
   }
 
   const uploadQuizData = async (quizData: QuizData[]) => {
-    // Create quiz
+    // Create the quiz shell
     const { data: quiz, error: quizError } = await supabase
       .from('quizzes')
       .insert([{ title: quizTitle, description: `Quiz with ${quizData.length} questions` }])
@@ -71,43 +79,65 @@ export default function ExcelUpload() {
 
     if (quizError) throw quizError
 
-    // Process each question
-    for (const [idx, questionData] of quizData.entries()) {
-      const correct = String(questionData.correctAnswer || '').trim().toUpperCase()
+    // Insert each question + its non-empty options
+    for (let idx = 0; idx < quizData.length; idx++) {
+      const rowNum = idx + 2 // Excel-ish: header is row 1
+      const q = quizData[idx]
+
+      const question_text = clean(q.question)
+      const correct = upper(q.correctAnswer)
+      const explanation = clean(q.explanation)
+      const hint = q.hint ? clean(q.hint) : null
+
+      if (!question_text) {
+        throw new Error(`Row ${rowNum}: "Question" is required.`)
+      }
       if (!['A', 'B', 'C', 'D'].includes(correct)) {
-        throw new Error(`Row ${idx + 2}: Correct Answer must be A, B, C, or D (got "${questionData.correctAnswer}")`)
+        throw new Error(`Row ${rowNum}: "Correct Answer" must be one of A, B, C, or D (got "${q.correctAnswer}").`)
       }
 
-      // Insert question (includes hint)
+      const optionsAll = [
+        { option_letter: 'A' as const, option_text: clean(q.optionA) },
+        { option_letter: 'B' as const, option_text: clean(q.optionB) },
+        { option_letter: 'C' as const, option_text: clean(q.optionC) },
+        { option_letter: 'D' as const, option_text: clean(q.optionD) },
+      ]
+
+      // Keep only non-empty options (supports 2–4 options)
+      const options = optionsAll.filter((o) => o.option_text.length > 0)
+
+      if (options.length < 2) {
+        throw new Error(`Row ${rowNum}: At least two non-empty options are required (A and B).`)
+      }
+      if (!options.some((o) => o.option_letter === correct)) {
+        throw new Error(`Row ${rowNum}: Correct Answer "${correct}" has no text. Provide Option ${correct}.`)
+      }
+
+      // Insert the question
       const { data: question, error: questionError } = await supabase
         .from('questions')
-        .insert([{
-          quiz_id: quiz.id,
-          question_text: (questionData.question || '').toString().trim(),
-          correct_answer: correct,
-          explanation: (questionData.explanation || '').toString().trim(),
-          hint: questionData.hint ?? null, // <-- NEW
-        }])
+        .insert([
+          {
+            quiz_id: quiz.id,
+            question_text,
+            correct_answer: correct, // canonical letter
+            explanation,
+            hint, // nullable; UI will show a "Hint" button only if present
+          },
+        ])
         .select()
         .single()
 
       if (questionError) throw questionError
 
-      // Insert answer options
-      const options = [
-        { option_letter: 'A', option_text: questionData.optionA },
-        { option_letter: 'B', option_text: questionData.optionB },
-        { option_letter: 'C', option_text: questionData.optionC },
-        { option_letter: 'D', option_text: questionData.optionD }
-      ].map(o => ({ ...o, option_text: (o.option_text || '').toString().trim() }))
-
+      // Insert only the present options
       const { error: optionsError } = await supabase
         .from('answer_options')
         .insert(
-          options.map(option => ({
+          options.map((o) => ({
             question_id: question.id,
-            option_letter: option.option_letter,
-            option_text: option.option_text
+            option_letter: o.option_letter,
+            option_text: o.option_text,
           }))
         )
 
@@ -117,12 +147,12 @@ export default function ExcelUpload() {
     return quiz
   }
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload: React.ChangeEventHandler<HTMLInputElement> = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
 
     if (!quizTitle.trim()) {
-      setMessage('Please enter a quiz title first')
+      setMessage('Please enter a quiz title first.')
       return
     }
 
@@ -130,25 +160,26 @@ export default function ExcelUpload() {
     setMessage('Processing file...')
 
     try {
-      console.log('Starting file processing...')
       const quizData = await processExcelFile(file)
-      console.log('Processed quiz data:', quizData)
-      
-      setMessage(`Found ${quizData.length} questions. Uploading to database...`)
-      console.log('Starting database upload...')
-      
+      if (quizData.length === 0) {
+        throw new Error('No rows found in the first worksheet.')
+      }
+
+      setMessage(`Found ${quizData.length} rows. Uploading to database...`)
       const quiz = await uploadQuizData(quizData)
-      console.log('Upload completed:', quiz)
-      
+
       setMessage(`✅ Successfully uploaded "${quiz.title}" with ${quizData.length} questions!`)
       setQuizTitle('')
-      
-      // Clear the file input
       event.target.value = ''
-      
     } catch (error) {
-      console.error('Upload error details:', error)
-      setMessage(`❌ Error: ${error instanceof Error ? error.message : JSON.stringify(error) || 'Upload failed'}`)
+      console.error('Upload error:', error)
+      const msg =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+          ? error
+          : 'Upload failed'
+      setMessage(`❌ Error: ${msg}`)
     } finally {
       setLoading(false)
     }
@@ -157,7 +188,7 @@ export default function ExcelUpload() {
   return (
     <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-lg">
       <h2 className="text-2xl font-bold mb-4">Upload Quiz Data</h2>
-      
+
       <div className="mb-4">
         <label className="block text-sm font-medium mb-2">Quiz Title:</label>
         <input
@@ -189,23 +220,41 @@ export default function ExcelUpload() {
       )}
 
       {message && (
-        <div className={`p-3 rounded ${
-          message.includes('✅') ? 'bg-green-100 text-green-700' : 
-          message.includes('❌') ? 'bg-red-100 text-red-700' : 
-          'bg-blue-100 text-blue-700'
-        }`}>
+        <div
+          className={`p-3 rounded ${
+            message.includes('✅')
+              ? 'bg-green-100 text-green-700'
+              : message.includes('❌')
+              ? 'bg-red-100 text-red-700'
+              : 'bg-blue-100 text-blue-700'
+          }`}
+        >
           {message}
         </div>
       )}
 
       <div className="mt-4 text-sm text-gray-600">
         <p><strong>Excel format expected:</strong></p>
-        <ul className="list-disc list-inside mt-1">
-          <li>Column headers: <code>Question</code>, <code>Option A</code>, <code>Option B</code>, <code>Option C</code>, <code>Option D</code>, <code>Correct Answer</code>, <code>Explanation</code>, <code>Hint</code> (optional)</li>
-          <li><code>Correct Answer</code> should be A, B, C, or D</li>
-          <li><code>Hint</code> can be blank; when blank the hint button is hidden</li>
+        <ul className="list-disc list-inside mt-1 space-y-1">
+          <li>
+            Column headers (case-insensitive accepted): <em>Question</em>, <em>Option A</em>, <em>Option B</em>,
+            <em> Option C</em> (optional), <em>Option D</em> (optional), <em>Correct Answer</em>, <em>Explanation</em>, <em>Hint</em> (optional)
+          </li>
+          <li>
+            You may leave <em>Option C</em> and/or <em>Option D</em> blank. The uploader will skip empty options.
+          </li>
+          <li>
+            <strong>Correct Answer</strong> must be one of A, B, C, or D, and that option must have text.
+          </li>
+          <li>
+            Explanations should be letter-free (e.g., no “B is correct” inside the explanation text).
+          </li>
+          <li>
+            If you supply a <em>Hint</em>, learners will see a “Show Hint” button on that item.
+          </li>
         </ul>
       </div>
     </div>
   )
 }
+
