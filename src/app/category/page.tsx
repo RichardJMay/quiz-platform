@@ -269,12 +269,9 @@ function CategoryPageContent() {
                   </div>
                   <div className="flex items-center">
                     <Users className="w-4 h-4 mr-2 text-green-600" />
-                    Expert-Designed Content
+                    Individualised feedback
                   </div>
-                  <div className="flex items-center">
-                    <Award className="w-4 h-4 mr-2 text-purple-600" />
-                    BCBA Exam Prep
-                  </div>
+
                 </div>
               </div>
             </div>
@@ -289,7 +286,7 @@ function CategoryPageContent() {
             {category?.name} Quizzes
           </h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Master your BCBA prep with expert-designed assessments and real-time progress tracking
+            Master behaviour analytic concepts with carefully designed questions and real-time progress tracking
           </p>
           {!user && (
             <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
@@ -304,7 +301,7 @@ function CategoryPageContent() {
           <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
             <div className="text-6xl mb-4">📚</div>
             <h3 className="text-2xl font-semibold text-gray-700 mb-2">New optibl Quizzes Coming Soon!</h3>
-            <p className="text-gray-600 mb-6">We're preparing amazing {category?.name} content for you. Check back soon!</p>
+            <p className="text-gray-600 mb-6"> {category?.name} content in prep. Check back soon!</p>
             <button
               onClick={() => router.push('/')}
               className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"

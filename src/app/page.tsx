@@ -298,7 +298,7 @@ const loadPurchasedQuizzes = async () => {
                   </span>
                 </h2>
                 <p className="text-xl sm:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto lg:mx-0 leading-relaxed">
-                  Master behaviour analytic concepts with a personalised learning platform — build fluency in core skills and conceptual understanding and track your progress.
+                  Master behaviour analytic concepts with optibl, a personalised learning platform designed to build fluency in core skills and conceptual understanding.
                 </p>
                 
                 {!user && (

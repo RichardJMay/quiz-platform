@@ -154,7 +154,7 @@ export default function LeaderboardPage() {
               </table>
 
               <p className="mt-3 text-xs text-gray-500">
-                Top scorers are entered into our monthly prize draw. (T&Cs apply)
+                Top scorers are entered into the monthly prize draw. Good times make good times (i.e., prizes!)
               </p>
             </div>
           )}
