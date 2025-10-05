@@ -128,8 +128,8 @@ export default function ProgressPage() {
 
 
   const getPerformanceColor = (accuracy: number, fluency: number): string => {
-    if (accuracy >= 80 && fluency >= 30) return 'text-green-600 bg-green-50';
-    if (accuracy >= 60 && fluency >= 20) return 'text-yellow-600 bg-yellow-50';
+    if (accuracy >= 80 && fluency >= 20) return 'text-green-600 bg-green-50';
+    if (accuracy >= 60 && fluency >= 10) return 'text-yellow-600 bg-yellow-50';
     return 'text-red-600 bg-red-50';
   };
 
@@ -257,7 +257,7 @@ function getPTAdviceForApp(opts: {
     chartData,
     correctCeleration,
     errorCeleration,
-    aimFluency = 25,
+    aimFluency = 20,
     aimError = 1,
   } = opts;
 
@@ -272,7 +272,7 @@ function getPTAdviceForApp(opts: {
   const errX  = errorCeleration    ? Math.pow(10, errorCeleration.slope)    : null;
 
   // Compute recent average duration from the raw attempts (newest first)
-const aimFluencylocal = 25; // or whatever you pass into the helper
+const aimFluencylocal = 20; // or whatever you pass into the helper
 const kDur = Math.min(3, filteredAttempts.length);
 const avgDurationMin =
   kDur > 0
@@ -917,21 +917,21 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
 
                                     <line
                                       x1={startX}
-                                      y1={toLogY(25)}
+                                      y1={toLogY(20)}
                                       x2={startX + chartWidth}
-                                      y2={toLogY(25)}
+                                      y2={toLogY(20)}
                                       stroke="#10B981"
                                       strokeWidth="1"
                                       strokeDasharray="10,5"
                                     />
                                     <text
                                       x={startX + chartWidth - 140}
-                                      y={toLogY(25) - 8}
+                                      y={toLogY(20) - 8}
                                       fontSize="13"
                                       fill="#059669"
                                       fontWeight={600}
                                     >
-                                      Correct aim: 25/min
+                                      Correct aim: 20/min
                                     </text>
                                     <line
                                     x1={startX}
@@ -1547,7 +1547,7 @@ const trend =
                                   <div className="flex items-center gap-2">
                                     <div className="w-8 h-0.5 bg-gradient-to-r from-green-500 to-green-400"></div>
                                     <span className="text-gray-700">
-                                      Aim line (25/min)
+                                      Aim line (20/min)
                                     </span>
                                   </div>
                                 </div>

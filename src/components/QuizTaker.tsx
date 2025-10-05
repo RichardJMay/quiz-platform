@@ -496,7 +496,7 @@ export default function QuizTaker() {
     const totalQuizTimeMinutes = startTime ? (endTime.getTime() - startTime.getTime()) / (1000 * 60) : 0
     const correctResponsesPerMinute = totalQuizTimeMinutes > 0 ? score / totalQuizTimeMinutes : 0
 
-    const threshold = 30
+    const threshold = 20
     const isAboveThreshold = correctResponsesPerMinute >= threshold
     const rateScore = Math.max(0, correctResponsesPerMinute - threshold)
     const maxBarWidth = 100
@@ -609,8 +609,8 @@ export default function QuizTaker() {
     const progress = ((currentQuestionIndex + 1) / questions.length) * 100
     const currentRate = getCurrentFluencyRate()
 
-    const threshold = 30
-    const maxBarRate = 60
+    const threshold = 20
+    const maxBarRate = 50
     const barPercentage = Math.min(100, (currentRate / maxBarRate) * 100)
     const isAboveThreshold = currentRate >= threshold
 
