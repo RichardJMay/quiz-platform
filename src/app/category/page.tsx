@@ -291,7 +291,7 @@ function CategoryPageContent() {
           {!user && (
             <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
               <p className="text-blue-700 font-medium">
-                💡 Create a free account to track your progress and access purchased content anytime!
+                💡 Create a free account to track your progress!
               </p>
             </div>
           )}
