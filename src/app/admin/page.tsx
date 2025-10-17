@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { supabasePublic } from '@/lib/supabase' // public client for probes
+import { supabasePublic } from '@/lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import ExcelUpload from '@/components/ExcelUpload'
+import BankedUpload from '@/components/BankedUpload'
 
 const ADMIN_EMAILS = [
   'richiemay1@hotmail.com',
@@ -17,6 +18,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [authLoading, setAuthLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'mcq' | 'banked'>('mcq')
   const { user } = useAuth()
   const router = useRouter()
 
@@ -192,9 +194,11 @@ export default function AdminPage() {
             <div className="text-center">
               <div className="text-green-600 text-lg mb-2">✅ Database connected successfully</div>
               <p className="text-gray-600 mb-4">
-                Upload your Excel file with quiz questions and set pricing.
+                Upload your Excel file with quiz questions or definitions and terms.
               </p>
-              <div className="flex gap-4 justify-center flex-wrap">
+
+              {/* Navigation links */}
+              <div className="flex gap-4 justify-center flex-wrap mb-6">
                 <Link
                   href="/"
                   className="inline-block bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
@@ -214,12 +218,40 @@ export default function AdminPage() {
                   View Progress Page
                 </Link>
               </div>
+
+              {/* Toggle for quiz type */}
+              <div className="inline-flex rounded-lg overflow-hidden border border-gray-300 shadow-sm mb-6">
+                <button
+                  onClick={() => setActiveTab('mcq')}
+                  className={`px-4 py-2 font-medium transition-colors duration-150 ${
+                    activeTab === 'mcq'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  Standard (MCQ)
+                </button>
+                <button
+                  onClick={() => setActiveTab('banked')}
+                  className={`px-4 py-2 font-medium transition-colors duration-150 ${
+                    activeTab === 'banked'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  Definition–Term (Banked)
+                </button>
+              </div>
+
+              {/* Upload component */}
+              <div className="mt-4">
+                {activeTab === 'mcq' ? <ExcelUpload /> : <BankedUpload />}
+              </div>
             </div>
           </div>
-
-          <ExcelUpload />
         </div>
       </div>
     </div>
   )
 }
+

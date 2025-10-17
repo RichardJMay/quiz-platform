@@ -1,13 +1,16 @@
 'use client'
 
-import { useEffect, useState, Suspense, useRef } from 'react'
+import { useEffect, useState, Suspense, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import PaymentButton from '@/components/payment/PaymentButton'
 import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '@/contexts/AuthContext'
 import Image from 'next/image'
-import { ArrowLeft, Clock, Users, Award } from 'lucide-react'
+import { ArrowLeft, Clock, Users } from 'lucide-react'
+
+type QuizMode = 'mcq' | 'banked'
+type ResponseMode = 'options' | 'typed' | null
 
 interface Quiz {
   id: string
@@ -16,7 +19,9 @@ interface Quiz {
   price: number
   is_free: boolean
   category_id: string
-  is_listed?: boolean // optional; fetched but not required elsewhere
+  is_listed?: boolean
+  quiz_mode?: QuizMode
+  response_mode?: ResponseMode
 }
 
 interface Category {
@@ -32,84 +37,115 @@ interface PurchasedQuiz {
   purchased_at: string
 }
 
+interface AttemptRow {
+  quiz_id: string
+  accuracy_percentage: number
+  fluency_rate: number
+  completed_at: string
+}
+
+type PerfStats = {
+  bestAccuracy: number | null
+  lastFluency: number | null
+}
+
 function CategoryPageContent() {
   const [category, setCategory] = useState<Category | null>(null)
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [purchasedQuizzes, setPurchasedQuizzes] = useState<PurchasedQuiz[]>([])
+  const [perfByQuiz, setPerfByQuiz] = useState<Record<string, PerfStats>>({})
   const [loading, setLoading] = useState(true)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login')
+
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, signOut, loading: authLoading } = useAuth()
-  
+
   const categoryId = searchParams.get('id')
-  const categoryName = searchParams.get('name')
   const navigatingRef = useRef(false)
 
   useEffect(() => {
     if (categoryId) {
-      loadCategory()
-      loadCategoryQuizzes()
-      if (user) {
-        loadPurchasedQuizzes()
-      }
+      void loadCategory()
+      void loadCategoryQuizzes()
+      if (user) void loadPurchasedQuizzes()
     }
-  }, [categoryId, user])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryId, user?.id])
 
   const loadCategory = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('quiz_categories')
       .select('*')
       .eq('id', categoryId)
       .single()
-
-    if (error) {
-      console.error('Error loading category:', error)
-    } else {
-      setCategory(data)
-    }
+    if (data) setCategory(data)
   }
 
   const loadCategoryQuizzes = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('quizzes')
-      .select('id, title, description, price, is_free, category_id, is_listed')
+      .select('id, title, description, price, is_free, category_id, is_listed, quiz_mode, response_mode')
       .eq('category_id', categoryId)
-      .eq('is_listed', true) // ← ONLY show listed quizzes
+      .eq('is_listed', true)
       .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Error loading quizzes:', error)
-    } else {
-      setQuizzes(data || [])
-    }
+    setQuizzes(data || [])
     setLoading(false)
   }
 
   const loadPurchasedQuizzes = async () => {
     if (!user) return
-
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('purchases')
       .select('quiz_id, purchased_at')
       .eq('user_id', user.id)
       .eq('status', 'completed')
 
-    if (error) {
-      console.error('Error loading purchased quizzes:', error)
-    } else {
-      setPurchasedQuizzes(data || [])
-    }
+    setPurchasedQuizzes(data || [])
   }
 
-  const startQuiz = (quizId: string) => {
-    if (navigatingRef.current) {
-      console.log('Already navigating to quiz, ignoring...')
-      return
+  // Load per-quiz performance for this user (best accuracy & last fluency)
+  useEffect(() => {
+    const loadPerformanceData = async () => {
+      if (!user || quizzes.length === 0) return
+      const { data, error } = await supabase
+        .from('quiz_attempts')
+        .select('quiz_id, accuracy_percentage, fluency_rate, completed_at')
+        .eq('user_id', user.id)
+
+      if (error || !data) return
+
+      const byQuiz = new Map<string, AttemptRow[]>()
+      data.forEach(r => {
+        if (!byQuiz.has(r.quiz_id)) byQuiz.set(r.quiz_id, [])
+        byQuiz.get(r.quiz_id)!.push(r)
+      })
+
+      const stats: Record<string, PerfStats> = {}
+      quizzes.forEach(q => {
+        const rows = byQuiz.get(q.id) || []
+        if (rows.length === 0) {
+          stats[q.id] = { bestAccuracy: null, lastFluency: null }
+        } else {
+          const bestAccuracy = Math.max(...rows.map(r => r.accuracy_percentage || 0))
+          const last = [...rows].sort((a, b) => b.completed_at.localeCompare(a.completed_at))[0]
+          stats[q.id] = {
+            bestAccuracy,
+            lastFluency: last?.fluency_rate ?? null,
+          }
+        }
+      })
+      setPerfByQuiz(stats)
     }
+
+    void loadPerformanceData()
+  }, [user?.id, quizzes])
+
+  const startQuiz = (quizId: string) => {
+    if (navigatingRef.current) return
     navigatingRef.current = true
-    console.log('Navigating to quiz:', quizId)
     router.push(`/quiz?id=${quizId}`)
     setTimeout(() => {
       navigatingRef.current = false
@@ -123,24 +159,19 @@ function CategoryPageContent() {
 
   const handleSignOut = async () => {
     try {
-      const { error } = await signOut()
+      await signOut()
       setPurchasedQuizzes([])
-      
       try {
         localStorage.clear()
         sessionStorage.clear()
         document.cookie.split(';').forEach((c) => {
-          document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`)
+          document.cookie = c
+            .replace(/^ +/, '')
+            .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`)
         })
-      } catch (storageError) {
-        console.log('Storage clear error:', storageError)
-      }
-      
-      setTimeout(() => {
-        window.location.replace('/')
-      }, 200)
-    } catch (error) {
-      console.error('Sign out error:', error)
+      } catch {}
+      setTimeout(() => window.location.replace('/'), 200)
+    } catch {
       try {
         localStorage.clear()
         sessionStorage.clear()
@@ -149,25 +180,130 @@ function CategoryPageContent() {
     }
   }
 
-  if (loading || authLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <div className="text-xl text-gray-700 animate-pulse">Loading category content...</div>
-        </div>
-      </div>
-    )
-  }
-
   const colorThemes = {
     blue: 'from-blue-500 to-blue-600',
     purple: 'from-purple-500 to-purple-600',
     green: 'from-green-500 to-green-600',
     orange: 'from-orange-500 to-orange-600',
     red: 'from-red-500 to-red-600',
-    indigo: 'from-indigo-500 to-indigo-600'
+    indigo: 'from-indigo-500 to-indigo-600',
   }
+
+  // Group quizzes → 3 columns
+  const mcqQuizzes = useMemo(
+    () => quizzes.filter(q => (q.quiz_mode ?? 'mcq') === 'mcq'),
+    [quizzes]
+  )
+  const bankedOptions = useMemo(
+    () => quizzes.filter(q => q.quiz_mode === 'banked' && (q.response_mode ?? 'options') === 'options'),
+    [quizzes]
+  )
+  const bankedTyped = useMemo(
+    () => quizzes.filter(q => q.quiz_mode === 'banked' && q.response_mode === 'typed'),
+    [quizzes]
+  )
+
+  // Small quiz card with mastery colour logic + stats
+  const SmallQuizCard = ({ quiz }: { quiz: Quiz }) => {
+  const isOwned = user && purchasedQuizzes.some(p => p.quiz_id === quiz.id)
+  const perf = perfByQuiz[quiz.id]
+  const acc = perf?.bestAccuracy ?? null
+  const flu = perf?.lastFluency ?? null
+
+  // fluency aims by type
+  let aim = 8
+  if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'options') aim = 17
+  if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed') aim = 8
+
+  // status colours (bg + border)
+  let bgClass = 'bg-red-50'
+  let borderClass = 'border-red-300'
+  if (acc === 100 && (flu ?? 0) >= aim) {
+    bgClass = 'bg-green-50'
+    borderClass = 'border-green-300'
+  } else if (acc === 100) {
+    bgClass = 'bg-amber-50'
+    borderClass = 'border-amber-300'
+  }
+
+  const badge =
+    (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed')
+      ? 'Typed'
+      : (quiz.quiz_mode === 'banked' ? 'Options' : 'MCQ')
+
+  const badgeStyle =
+    badge === 'Typed' ? 'bg-purple-100 text-purple-800'
+    : badge === 'Options' ? 'bg-emerald-100 text-emerald-800'
+    : 'bg-blue-100 text-blue-800'
+
+  const bestAccStr = acc !== null ? `${acc}%` : '—'
+  const lastFluStr = flu !== null ? `${flu.toFixed(1)}/min` : '—'
+
+  return (
+    <div
+      className={[
+        'rounded-xl p-4 border-2 shadow-sm transition-all',
+        bgClass,
+        borderClass,
+        'hover:shadow-md hover:brightness-[0.98]',
+      ].join(' ')}
+      aria-label={`Quiz card: ${quiz.title}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <h4 className="font-semibold text-gray-900 text-sm line-clamp-2">
+          {quiz.title}
+        </h4>
+        <span
+          className={`ml-2 inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full ${badgeStyle}`}
+        >
+          {badge}
+        </span>
+      </div>
+
+      {quiz.description && (
+        <p className="text-xs text-gray-700 mt-1 line-clamp-2">{quiz.description}</p>
+      )}
+
+      {/* Stats */}
+      <div className="mt-3 flex items-center justify-between text-[11px] text-gray-800">
+        <span>⭐ Best: <span className="font-medium">{bestAccStr}</span></span>
+        <span>⚡ Last: <span className="font-medium">{lastFluStr}</span></span>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between">
+        <span className="text-[11px] text-gray-700">
+          {quiz.is_free ? 'Free' : quiz.price ? `£${quiz.price}` : 'Paid'}
+        </span>
+
+        {isOwned ? (
+          <button
+            onClick={() => startQuiz(quiz.id)}
+            className="text-xs px-3 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            Take Quiz
+          </button>
+        ) : quiz.is_free ? (
+          <button
+            onClick={() => startQuiz(quiz.id)}
+            className="text-xs px-3 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Start
+          </button>
+        ) : (
+          <div className="min-w-[96px]">
+            <PaymentButton
+              quizId={quiz.id}
+              price={quiz.price}
+              title={quiz.title}
+              className="w-full !text-xs !py-1"
+              onAuthRequired={() => handleAuthModalOpen('register')}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -186,7 +322,6 @@ function CategoryPageContent() {
                 />
               </div>
             </div>
-            
             <div className="flex flex-col sm:items-end space-y-2">
               {user ? (
                 <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
@@ -246,7 +381,7 @@ function CategoryPageContent() {
         </button>
       </div>
 
-      {/* Category Header */}
+      {/* Category header */}
       {category && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
           <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-gray-200/50 mb-12">
@@ -261,7 +396,6 @@ function CategoryPageContent() {
                 <p className="text-xl text-gray-600 mb-6">
                   {category.description}
                 </p>
-                
                 <div className="flex flex-wrap gap-6 text-sm text-gray-600">
                   <div className="flex items-center">
                     <Clock className="w-4 h-4 mr-2 text-blue-600" />
@@ -271,7 +405,6 @@ function CategoryPageContent() {
                     <Users className="w-4 h-4 mr-2 text-green-600" />
                     Individualised feedback
                   </div>
-
                 </div>
               </div>
             </div>
@@ -279,29 +412,22 @@ function CategoryPageContent() {
         </div>
       )}
 
-      {/* Quizzes in Category */}
+      {/* Quizzes: three columns */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
+        <div className="text-center mb-8">
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
             {category?.name} Quizzes
           </h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Master behaviour analytic concepts with carefully designed questions and real-time progress tracking
+          <p className="text-base text-gray-600 max-w-3xl mx-auto">
+            Turn your quiz cards from <span className="font-semibold text-red-600">red</span> ➜ <span className="font-semibold text-amber-600">amber</span> ➜ <span className="font-semibold text-green-600">green</span> by mastering fluency and accuracy!
           </p>
-          {!user && (
-            <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
-              <p className="text-blue-700 font-medium">
-                💡 Create a free account to track your progress!
-              </p>
-            </div>
-          )}
         </div>
-        
+
         {quizzes.length === 0 ? (
           <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
             <div className="text-6xl mb-4">📚</div>
             <h3 className="text-2xl font-semibold text-gray-700 mb-2">New optibl Quizzes Coming Soon!</h3>
-            <p className="text-gray-600 mb-6"> {category?.name} content in prep. Check back soon!</p>
+            <p className="text-gray-600 mb-6">{category?.name} content in prep. Check back soon!</p>
             <button
               onClick={() => router.push('/')}
               className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
@@ -310,54 +436,35 @@ function CategoryPageContent() {
             </button>
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {quizzes.map((quiz) => {
-              const isOwned = user && purchasedQuizzes.some(p => p.quiz_id === quiz.id)
-              
-              return (
-                <div key={quiz.id} className={`bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50 ${isOwned ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-blue-500'}`}>
-                  <div className="p-8">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-xl font-bold text-gray-900">{quiz.title}</h3>
-                      {isOwned && <span className="text-green-500 text-xl">✅</span>}
-                    </div>
-                    <p className="text-gray-600 mb-6">{quiz.description}</p>
-                    
-                    {!quiz.is_free && (
-                      <div className="mb-6">
-                        <span className="inline-flex items-center bg-gradient-to-r from-blue-100 to-purple-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full">
-                          💎 Dr May's Premium - ${quiz.price}
-                        </span>
-                      </div>
-                    )}
-                    
-                    {isOwned ? (
-                      <button
-                        onClick={() => startQuiz(quiz.id)}
-                        className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                      >
-                        ✨ Take Quiz (Owned)
-                      </button>
-                    ) : quiz.is_free ? (
-                      <button
-                        onClick={() => startQuiz(quiz.id)}
-                        className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                      >
-                        Go to the Quiz
-                      </button>
-                    ) : (
-                      <PaymentButton
-                        quizId={quiz.id}
-                        price={quiz.price}
-                        title={quiz.title}
-                        className="w-full"
-                        onAuthRequired={() => handleAuthModalOpen('register')}
-                      />
-                    )}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* column renderer */}
+            {(() => {
+              const Column = ({ title, chipClass, items }: { title: string; chipClass: string; items: Quiz[] }) => (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+                    <span className={`text-xs ${chipClass} px-2 py-0.5 rounded-full`}>{items.length}</span>
                   </div>
+                  {items.length === 0 ? (
+                    <div className="text-sm text-gray-500 bg-white/70 border border-gray-200 rounded-xl p-4">
+                      No quizzes yet.
+                    </div>
+                  ) : (
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-1 gap-3">
+                      {items.map(q => <SmallQuizCard key={q.id} quiz={q} />)}
+                    </div>
+                  )}
                 </div>
               )
-            })}
+
+              return (
+                <>
+                  <Column title="Questions (MCQ)" chipClass="bg-blue-50 text-blue-700" items={mcqQuizzes} />
+                  <Column title="Fluency Terms (Options)" chipClass="bg-emerald-50 text-emerald-700" items={bankedOptions} />
+                  <Column title="Fluency Terms (Typed)" chipClass="bg-purple-50 text-purple-700" items={bankedTyped} />
+                </>
+              )
+            })()}
           </div>
         )}
       </div>
@@ -411,3 +518,4 @@ export default function CategoryPage() {
     </Suspense>
   )
 }
+
