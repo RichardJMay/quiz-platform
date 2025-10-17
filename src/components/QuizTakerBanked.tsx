@@ -198,7 +198,7 @@ export default function QuizTakerBanked() {
 
   const currentRate = useMemo(() => getCurrentFluencyRate(), [score, startTime, tick])
 
-  const threshold = 20 // (You can adjust per-mode if you like)
+  const threshold = 20 // keep as-is unless you want to set banked aim = 17 here
   const maxBarRate = 50
   const barPercentage = Math.min(100, (currentRate / maxBarRate) * 100)
   const isAboveThreshold = currentRate >= threshold
@@ -565,7 +565,7 @@ export default function QuizTakerBanked() {
                 </div>
               )}
 
-              {/* Term options — NO LETTERS, just the term text */}
+              {/* Term options — NO LETTERS, high contrast + mobile-friendly text */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3 mb-4 sm:mb-6">
                 {shuffledOptions.map((term) => {
                   const isSelected = selectedTermId === term.id
@@ -576,7 +576,7 @@ export default function QuizTakerBanked() {
                       disabled={showFeedback}
                       onClick={() => setSelectedTermId(term.id)}
                       className={[
-                        'text-left text-sm sm:text-base px-3 py-2 rounded-lg border transition select-none',
+                        'text-left text-base sm:text-lg text-gray-900 font-medium leading-snug break-words px-3 py-2 rounded-lg border transition select-none',
                         isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400 bg-white',
                         showFeedback ? 'cursor-not-allowed opacity-90' : ''
                       ].join(' ')}
@@ -675,3 +675,4 @@ export default function QuizTakerBanked() {
     </div>
   )
 }
+

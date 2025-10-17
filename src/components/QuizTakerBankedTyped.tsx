@@ -272,12 +272,12 @@ export default function QuizTakerBankedTyped() {
       setRemainingTerms(prev => prev.filter(t => t.id !== matchedTermId))
     }
 
-    // Save response (free_text optional—only saved if column exists; insert ignores unknown columns gracefully)
+    // Save response
     await supabase.from('student_responses').insert([{
       student_name: studentName,
       question_id: currentQuestion.id,
       selected_term_id: matchedTermId ?? null,
-      free_text: typed,              // requires the optional column if you want to persist this
+      free_text: typed,
       is_correct: isCorrect,
     }])
 
@@ -544,16 +544,19 @@ export default function QuizTakerBankedTyped() {
                 </div>
               )}
 
-              {/* Input */}
+              {/* Input — ensure BLACK text on mobile */}
               <div className="mb-4">
                 <input
                   type="text"
                   value={typed}
                   onChange={(e) => setTyped(e.target.value)}
                   onFocus={startIdleTimers}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400 caret-gray-900 appearance-none"
                   placeholder="Type the matching term..."
                   disabled={showFeedback}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
               </div>
 
@@ -617,8 +620,11 @@ export default function QuizTakerBankedTyped() {
           type="text"
           value={studentName}
           onChange={(e) => setStudentName(e.target.value)}
-          className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400 caret-gray-900 appearance-none"
           placeholder="Enter your name..."
+          autoCapitalize="words"
+          autoCorrect="off"
+          spellCheck={false}
         />
       </div>
 
@@ -643,3 +649,4 @@ export default function QuizTakerBankedTyped() {
     </div>
   )
 }
+
