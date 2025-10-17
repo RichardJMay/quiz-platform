@@ -36,7 +36,6 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
-// Idle timeout (5 minutes total; warn at 4.5 minutes) — matches your original
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const IDLE_WARNING_MS = 4.5 * 60 * 1000
 
@@ -46,11 +45,9 @@ export default function QuizTakerBanked() {
   const quizId = searchParams.get('id')
   const { user } = useAuth()
 
-  // Quiz selection / loading (like your original)
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [selectedQuiz, setSelectedQuiz] = useState<Quiz | null>(null)
 
-  // Core quiz state
   const [questions, setQuestions] = useState<BankedQuestion[]>([])
   const [terms, setTerms] = useState<Term[]>([])
   const [remainingTerms, setRemainingTerms] = useState<Term[]>([])
@@ -66,15 +63,12 @@ export default function QuizTakerBanked() {
   const [loading, setLoading] = useState(false)
   const [startTime, setStartTime] = useState<Date | null>(null)
 
-  // “live rate” tick (updates UI every second like a stopwatch)
   const [tick, setTick] = useState(0)
 
-  // Idle tracking (matches your pattern)
   const [idleWarning, setIdleWarning] = useState(false)
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const idleWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ---------- Initial quiz load ----------
   useEffect(() => {
     if (quizId) {
       loadSpecificQuiz(quizId)
@@ -116,7 +110,6 @@ export default function QuizTakerBanked() {
         return
       }
 
-      // You’re running free-only right now; this just selects the quiz
       setSelectedQuiz({
         id: quiz.id,
         title: quiz.title,
@@ -132,7 +125,6 @@ export default function QuizTakerBanked() {
     }
   }
 
-  // ---------- Start quiz: fetch term bank + questions ----------
   const startQuiz = async (quiz: Quiz) => {
     const displayName =
       user?.user_metadata?.full_name ||
@@ -160,11 +152,12 @@ export default function QuizTakerBanked() {
       if (termError) throw termError
       if (qError) throw qError
 
-      const shuffledQs = shuffle(qData || [])
+      // ✅ Randomize QUESTION order (only)
+      const randomizedQs = shuffle(qData || [])
 
       setTerms(termData || [])
-      setRemainingTerms(termData || [])
-      setQuestions(shuffledQs as BankedQuestion[])
+      setRemainingTerms(termData || []) // keep natural order for options
+      setQuestions(randomizedQs as BankedQuestion[])
       setCurrentQuestionIndex(0)
       setSelectedTermId('')
       setShowFeedback(false)
@@ -180,16 +173,14 @@ export default function QuizTakerBanked() {
     }
   }
 
-  // ---------- Derived per-view state ----------
   const currentQuestion: BankedQuestion | undefined = questions[currentQuestionIndex]
 
-  // Shuffle remaining terms for each question (stable per question id)
-  const shuffledOptions: Term[] = useMemo(() => {
+  // ❌ DO NOT randomize options — show in stable (bank) order
+  const options: Term[] = useMemo(() => {
     if (!currentQuestion) return []
-    return shuffle(remainingTerms)
+    return remainingTerms
   }, [remainingTerms, currentQuestion?.id])
 
-  // Live “correct/min” rate (recompute each second via `tick`)
   const getCurrentFluencyRate = () => {
     if (!startTime) return 0
     const elapsedMinutes = (Date.now() - startTime.getTime()) / (1000 * 60)
@@ -198,12 +189,11 @@ export default function QuizTakerBanked() {
 
   const currentRate = useMemo(() => getCurrentFluencyRate(), [score, startTime, tick])
 
-  const threshold = 20 // keep as-is unless you want to set banked aim = 17 here
+  const threshold = 20
   const maxBarRate = 50
   const barPercentage = Math.min(100, (currentRate / maxBarRate) * 100)
   const isAboveThreshold = currentRate >= threshold
 
-  // ---------- Idle helpers (same pattern as your original) ----------
   const clearIdleTimers = () => {
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null }
     if (idleWarnTimerRef.current) { clearTimeout(idleWarnTimerRef.current); idleWarnTimerRef.current = null }
@@ -228,7 +218,6 @@ export default function QuizTakerBanked() {
     }
   }
 
-  // Global activity listeners while running + 1s tick for live rate
   useEffect(() => {
     const inQuiz = !!selectedQuiz && questions.length > 0 && !quizCompleted
     if (!inQuiz) return
@@ -262,7 +251,6 @@ export default function QuizTakerBanked() {
     if (quizCompleted) clearIdleTimers()
   }, [quizCompleted])
 
-  // ---------- Actions ----------
   const submitAnswer = async () => {
     if (!selectedTermId) {
       alert('Please select an answer')
@@ -273,7 +261,7 @@ export default function QuizTakerBanked() {
     const isCorrect = selectedTermId === currentQuestion.correct_term_id
     if (isCorrect) {
       setScore(prev => prev + 1)
-      // Remove the correctly used term from future options
+      // remove the correctly used term from future options (keeps original order otherwise)
       setRemainingTerms(prev => prev.filter(t => t.id !== selectedTermId))
     }
 
@@ -282,7 +270,7 @@ export default function QuizTakerBanked() {
       .insert([{
         student_name: studentName,
         question_id: currentQuestion.id,
-        selected_term_id: selectedTermId, // banked mode selection
+        selected_term_id: selectedTermId,
         is_correct: isCorrect,
       }])
 
@@ -319,7 +307,7 @@ export default function QuizTakerBanked() {
       accuracy_percentage: accuracyPercentage,
       fluency_rate: fluencyRate,
       total_time_minutes: totalTimeMinutes,
-      remaining_term_ids: remainingTerms.map(t => t.id), // persist remaining options
+      remaining_term_ids: remainingTerms.map(t => t.id),
       ...(user && { user_id: user.id })
     }
 
@@ -352,9 +340,6 @@ export default function QuizTakerBanked() {
     setIdleWarning(false)
   }
 
-  // ---------- UI STATES ----------
-
-  // Loading state
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -363,7 +348,6 @@ export default function QuizTakerBanked() {
     )
   }
 
-  // Completion screen
   if (quizCompleted) {
     const percentage = Math.round((score / questions.length) * 100)
     const endTime = new Date()
@@ -454,7 +438,6 @@ export default function QuizTakerBanked() {
     )
   }
 
-  // Start screen for a specific quiz
   if (selectedQuiz && questions.length === 0) {
     const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student'
 
@@ -477,14 +460,12 @@ export default function QuizTakerBanked() {
     )
   }
 
-  // In-progress quiz UI
   if (selectedQuiz && questions.length > 0 && currentQuestion) {
     const progress = ((currentQuestionIndex + 1) / questions.length) * 100
     const correctTerm = terms.find(t => t.id === currentQuestion.correct_term_id)
 
     return (
       <div className="min-h-screen bg-gray-100" onMouseMove={startIdleTimers} onKeyDown={startIdleTimers}>
-        {/* Header */}
         <div className="bg-white shadow-sm border-b">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4">
             <div className="flex-1">
@@ -502,7 +483,6 @@ export default function QuizTakerBanked() {
 
         <div className="max-w-4xl mx-auto p-4 sm:p-6">
           <div className="w-full">
-            {/* Idle warning */}
             {idleWarning && !quizCompleted && (
               <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-800">
                 You’ve been inactive for a while. The quiz will end soon unless you continue.
@@ -515,7 +495,6 @@ export default function QuizTakerBanked() {
               </div>
             )}
 
-            {/* Progress + live rate */}
             <div className="mb-4 sm:mb-6">
               <div className="flex flex-col sm:flex-row justify-between text-sm text-gray-600 mb-2 gap-1 sm:gap-4">
                 <span className="font-medium">Definition {currentQuestionIndex + 1} of {questions.length}</span>
@@ -532,7 +511,6 @@ export default function QuizTakerBanked() {
                   style={{ width: `${progress}%` }}
                 />
               </div>
-              {/* Optional rate bar vs threshold */}
               <div className="w-full bg-gray-200 rounded h-2">
                 <div
                   className={`${isAboveThreshold ? 'bg-green-500' : 'bg-red-500'} h-2 rounded transition-all duration-300`}
@@ -542,13 +520,11 @@ export default function QuizTakerBanked() {
               <div className="mt-1 text-xs text-gray-600">Target: {threshold}/min</div>
             </div>
 
-            {/* Definition prompt */}
             <div className="bg-white rounded-lg shadow-lg p-4 sm:p-6">
               <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 leading-relaxed text-gray-900">
                 {currentQuestion.question_text}
               </h2>
 
-              {/* Hint button */}
               {(currentQuestion.hint && currentQuestion.hint.trim().length > 0) && !showFeedback && (
                 <div className="mb-4">
                   <button
@@ -565,9 +541,9 @@ export default function QuizTakerBanked() {
                 </div>
               )}
 
-              {/* Term options — NO LETTERS, high contrast + mobile-friendly text */}
+              {/* Options in fixed (bank) order */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3 mb-4 sm:mb-6">
-                {shuffledOptions.map((term) => {
+                {options.map((term) => {
                   const isSelected = selectedTermId === term.id
                   return (
                     <button
@@ -576,7 +552,7 @@ export default function QuizTakerBanked() {
                       disabled={showFeedback}
                       onClick={() => setSelectedTermId(term.id)}
                       className={[
-                        'text-left text-base sm:text-lg text-gray-900 font-medium leading-snug break-words px-3 py-2 rounded-lg border transition select-none',
+                        'text-left text-sm sm:text-base px-3 py-2 rounded-lg border transition select-none text-gray-900',
                         isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400 bg-white',
                         showFeedback ? 'cursor-not-allowed opacity-90' : ''
                       ].join(' ')}
@@ -589,7 +565,6 @@ export default function QuizTakerBanked() {
                 })}
               </div>
 
-              {/* Feedback */}
               {showFeedback && (
                 <div
                   className={`p-3 sm:p-4 rounded-lg mb-4 sm:mb-6 ${
@@ -610,7 +585,6 @@ export default function QuizTakerBanked() {
                 </div>
               )}
 
-              {/* Actions */}
               <div className="flex justify-center sm:justify-end">
                 {!showFeedback ? (
                   <button
@@ -636,7 +610,6 @@ export default function QuizTakerBanked() {
     )
   }
 
-  // Quiz selection screen (fallback, for when no ?id is provided)
   return (
     <div className="max-w-2xl mx-auto p-6">
       <h1 className="text-3xl font-bold text-center mb-8">Select a Banked Quiz</h1>
@@ -647,7 +620,7 @@ export default function QuizTakerBanked() {
           type="text"
           value={studentName}
           onChange={(e) => setStudentName(e.target.value)}
-          className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400 caret-gray-900 appearance-none"
           placeholder="Enter your name..."
         />
       </div>
@@ -675,4 +648,3 @@ export default function QuizTakerBanked() {
     </div>
   )
 }
-

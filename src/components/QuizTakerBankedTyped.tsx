@@ -26,7 +26,7 @@ interface BankedQuestion {
   correct_term_id: string
 }
 
-type AliasMap = Record<string, string[]> // term_id -> [alias, ...]
+type AliasMap = Record<string, string[]>
 
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice()
@@ -49,11 +49,9 @@ export default function QuizTakerBankedTyped() {
   const quizId = searchParams.get('id')
   const { user } = useAuth()
 
-  // selection
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [selectedQuiz, setSelectedQuiz] = useState<Quiz | null>(null)
 
-  // quiz state
   const [questions, setQuestions] = useState<BankedQuestion[]>([])
   const [terms, setTerms] = useState<Term[]>([])
   const [remainingTerms, setRemainingTerms] = useState<Term[]>([])
@@ -70,15 +68,12 @@ export default function QuizTakerBankedTyped() {
   const [loading, setLoading] = useState(false)
   const [startTime, setStartTime] = useState<Date | null>(null)
 
-  // live rate tick
   const [tick, setTick] = useState(0)
 
-  // idle
   const [idleWarning, setIdleWarning] = useState(false)
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const idleWarnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // load list or specific
   useEffect(() => {
     if (quizId) {
       loadSpecificQuiz(quizId)
@@ -147,7 +142,10 @@ export default function QuizTakerBankedTyped() {
       if (tErr) throw tErr
       if (qErr) throw qErr
 
-      // Optional: load aliases if table exists
+      // ✅ Randomize QUESTION order (only)
+      const randomizedQs = shuffle(qData || [])
+
+      // Optional aliases
       let aliasMap: AliasMap = {}
       const { data: aliasRows, error: aErr } = await supabase
         .from('quiz_term_aliases')
@@ -163,10 +161,9 @@ export default function QuizTakerBankedTyped() {
       }
       setAliases(aliasMap)
 
-      const shuffledQs = shuffle(qData || [])
       setTerms(termData || [])
       setRemainingTerms(termData || [])
-      setQuestions(shuffledQs as BankedQuestion[])
+      setQuestions(randomizedQs as BankedQuestion[])
       setCurrentQuestionIndex(0)
       setTyped('')
       setShowFeedback(false)
@@ -201,7 +198,6 @@ export default function QuizTakerBankedTyped() {
   const barPercentage = Math.min(100, (currentRate / maxBarRate) * 100)
   const isAboveThreshold = currentRate >= threshold
 
-  // idle
   const clearIdleTimers = () => {
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null }
     if (idleWarnTimerRef.current) { clearTimeout(idleWarnTimerRef.current); idleWarnTimerRef.current = null }
@@ -218,7 +214,6 @@ export default function QuizTakerBankedTyped() {
     try { await saveQuizAttempt() } finally { setQuizCompleted(true) }
   }
 
-  // global listeners + 1s tick
   useEffect(() => {
     const inQuiz = !!selectedQuiz && questions.length > 0 && !quizCompleted
     if (!inQuiz) return
@@ -253,7 +248,6 @@ export default function QuizTakerBankedTyped() {
     const t = normalize(typed)
     if (!t) return { isCorrect: false }
 
-    // candidates = correct term text + aliases
     const candidates = [correctTerm.term_text, ...(aliases[correctTerm.id] || [])]
       .map(normalize)
       .filter(Boolean)
@@ -268,11 +262,9 @@ export default function QuizTakerBankedTyped() {
     const { isCorrect, matchedTermId } = gradeTyped()
     if (isCorrect && matchedTermId) {
       setScore(prev => prev + 1)
-      // remove term from remaining bank
       setRemainingTerms(prev => prev.filter(t => t.id !== matchedTermId))
     }
 
-    // Save response
     await supabase.from('student_responses').insert([{
       student_name: studentName,
       question_id: currentQuestion.id,
@@ -334,8 +326,6 @@ export default function QuizTakerBankedTyped() {
     setStartTime(null)
     setIdleWarning(false)
   }
-
-  // ----------- UI states -----------
 
   if (loading) {
     return (
@@ -435,7 +425,6 @@ export default function QuizTakerBankedTyped() {
     )
   }
 
-  // Start screen (when there is a specific quiz but not started yet)
   if (selectedQuiz && questions.length === 0) {
     const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student'
 
@@ -458,13 +447,11 @@ export default function QuizTakerBankedTyped() {
     )
   }
 
-  // In-progress UI
   if (selectedQuiz && questions.length > 0 && currentQuestion) {
     const progress = ((currentQuestionIndex + 1) / questions.length) * 100
 
     return (
       <div className="min-h-screen bg-gray-100" onMouseMove={startIdleTimers} onKeyDown={startIdleTimers}>
-        {/* Header */}
         <div className="bg-white shadow-sm border-b">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4">
             <div className="flex-1">
@@ -482,7 +469,6 @@ export default function QuizTakerBankedTyped() {
 
         <div className="max-w-4xl mx-auto p-4 sm:p-6">
           <div className="w-full">
-            {/* Idle warning */}
             {idleWarning && !quizCompleted && (
               <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-800">
                 You’ve been inactive for a while. The quiz will end soon unless you continue.
@@ -495,7 +481,6 @@ export default function QuizTakerBankedTyped() {
               </div>
             )}
 
-            {/* Progress + live rate */}
             <div className="mb-4 sm:mb-6">
               <div className="flex flex-col sm:flex-row justify-between text-sm text-gray-600 mb-2 gap-1 sm:gap-4">
                 <span className="font-medium">Definition {currentQuestionIndex + 1} of {questions.length}</span>
@@ -521,13 +506,11 @@ export default function QuizTakerBankedTyped() {
               <div className="mt-1 text-xs text-gray-600">Target: {threshold}/min</div>
             </div>
 
-            {/* Definition + Typed input */}
             <div className="bg-white rounded-lg shadow-lg p-4 sm:p-6">
               <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 leading-relaxed text-gray-900">
                 {currentQuestion.question_text}
               </h2>
 
-              {/* Hint */}
               {(currentQuestion.hint && currentQuestion.hint.trim().length > 0) && !showFeedback && (
                 <div className="mb-4">
                   <button
@@ -544,7 +527,6 @@ export default function QuizTakerBankedTyped() {
                 </div>
               )}
 
-              {/* Input — ensure BLACK text on mobile */}
               <div className="mb-4">
                 <input
                   type="text"
@@ -560,7 +542,6 @@ export default function QuizTakerBankedTyped() {
                 />
               </div>
 
-              {/* Feedback */}
               {showFeedback && (
                 <div
                   className={`p-3 sm:p-4 rounded-lg mb-4 sm:mb-6 ${
@@ -583,7 +564,6 @@ export default function QuizTakerBankedTyped() {
                 </div>
               )}
 
-              {/* Actions */}
               <div className="flex justify-center sm:justify-end">
                 {!showFeedback ? (
                   <button
@@ -609,7 +589,6 @@ export default function QuizTakerBankedTyped() {
     )
   }
 
-  // fallback selection when no id provided
   return (
     <div className="max-w-2xl mx-auto p-6">
       <h1 className="text-3xl font-bold text-center mb-8">Select a Banked (Typed) Quiz</h1>
@@ -622,9 +601,6 @@ export default function QuizTakerBankedTyped() {
           onChange={(e) => setStudentName(e.target.value)}
           className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400 caret-gray-900 appearance-none"
           placeholder="Enter your name..."
-          autoCapitalize="words"
-          autoCorrect="off"
-          spellCheck={false}
         />
       </div>
 
@@ -649,4 +625,5 @@ export default function QuizTakerBankedTyped() {
     </div>
   )
 }
+
 
