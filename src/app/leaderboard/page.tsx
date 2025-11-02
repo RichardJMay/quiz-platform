@@ -9,9 +9,74 @@ import { supabase } from '@/lib/supabase';
 type LeaderRow = {
   quiz_id: string;
   title: string;
-  yourBestRaw: number;   // keep raw for comparison
-  globalBestRaw: number; // keep raw for comparison
+  yourBestRaw: number;     // best fluency (you)
+  globalBestRaw: number;   // best fluency (global)
+  yourBestStreak: number;  // best daily streak (you, per quiz)
+  yourCurrentStreak: number; // current daily streak (you, per quiz)
 };
+
+// --- helpers (Europe/London day bucketing + streaks) ---
+const toLondonDateKey = (iso: string) => {
+  // ISO -> Europe/London local calendar day "YYYY-MM-DD"
+  const d = new Date(new Date(iso).toLocaleString('en-US', { timeZone: 'Europe/London' }));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const addDaysKey = (yyyyMmDd: string, delta: number) => {
+  const [y, m, d] = yyyyMmDd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+};
+
+function computeBestAndCurrentStreak(londonDayKeys: string[]): { best: number; current: number } {
+  if (londonDayKeys.length === 0) return { best: 0, current: 0 };
+
+  const uniq = Array.from(new Set(londonDayKeys)).sort(); // de-dupe per day, ascending
+
+  // best streak over the series
+  let best = 1;
+  let run = 1;
+  for (let i = 1; i < uniq.length; i++) {
+    const prev = uniq[i - 1];
+    const expectedNext = addDaysKey(prev, 1);
+    if (uniq[i] === expectedNext) {
+      run += 1;
+    } else {
+      if (run > best) best = run;
+      run = 1;
+    }
+  }
+  if (run > best) best = run;
+
+  // current streak anchored at today if played today, else yesterday if played yesterday
+  const todayLDN = toLondonDateKey(new Date().toISOString());
+  const playedToday = uniq.includes(todayLDN);
+  const yesterdayLDN = addDaysKey(todayLDN, -1);
+  const playedYesterday = uniq.includes(yesterdayLDN);
+
+  let anchor: string | null = null;
+  if (playedToday) anchor = todayLDN;
+  else if (playedYesterday) anchor = yesterdayLDN;
+
+  let current = 0;
+  if (anchor) {
+    current = 1;
+    let nextDay = addDaysKey(anchor, -1);
+    while (uniq.includes(nextDay)) {
+      current += 1;
+      nextDay = addDaysKey(nextDay, -1);
+    }
+  }
+
+  return { best, current };
+}
 
 export default function LeaderboardPage() {
   const { user } = useAuth();
@@ -25,60 +90,63 @@ export default function LeaderboardPage() {
     (async () => {
       setLoading(true);
       try {
-        // 1) Your attempts (to limit leaderboard to quizzes you've actually played)
+        // 1) Your attempts (quiz-specific scope: only quizzes you've actually played)
         const { data: attempts, error } = await supabase
           .from('quiz_attempts')
           .select(`
             quiz_id,
             fluency_rate,
+            completed_at,
             quizzes!inner(title)
           `)
           .eq('user_id', user.id);
 
         if (error) throw error;
 
-        // 2) Your best per quiz
-        const yourBest = new Map<string, { title: string; best: number }>();
+        // 2) Aggregate your best fluency per quiz + collect day keys per quiz for streaks
+        type Yours = { title: string; bestFluency: number; days: string[] };
+        const yourByQuiz = new Map<string, Yours>();
+
         (attempts || []).forEach((a: any) => {
-          const prev = yourBest.get(a.quiz_id)?.best ?? -Infinity;
-          if (a.fluency_rate > prev) {
-            yourBest.set(a.quiz_id, {
-              title: a.quizzes?.title ?? 'Untitled quiz',
-              best: a.fluency_rate,
-            });
+          const qid = a.quiz_id as string;
+          const title = a.quizzes?.title ?? 'Untitled quiz';
+          const prev = yourByQuiz.get(qid);
+          const dayKey = toLondonDateKey(a.completed_at);
+          if (!prev) {
+            yourByQuiz.set(qid, { title, bestFluency: a.fluency_rate ?? 0, days: [dayKey] });
+          } else {
+            prev.bestFluency = Math.max(prev.bestFluency, a.fluency_rate ?? 0);
+            prev.days.push(dayKey);
           }
         });
 
-        const quizIds = Array.from(yourBest.keys());
-        if (quizIds.length === 0) {
-          setRows([]);
-          return;
-        }
+        const quizIds = Array.from(yourByQuiz.keys());
+        if (quizIds.length === 0) { setRows([]); return; }
 
-        // 3) Global bests via RPC (bypasses RLS, returns only aggregates)
-        const { data: gbRows, error: gErr } = await supabase.rpc('get_global_bests', {
-          quiz_ids: quizIds,
-        });
+        // 3) Global best fluency for these quizzes (keep your existing RPC)
+        const { data: gbRows, error: gErr } = await supabase.rpc('get_global_bests', { quiz_ids: quizIds });
         if (gErr) throw gErr;
-
-        const globalBestMap = new Map<string, number>();
+        const globalBestFluency = new Map<string, number>();
         (gbRows || []).forEach((r: any) => {
-          globalBestMap.set(r.quiz_id, Number(r.global_best) || 0);
+          globalBestFluency.set(r.quiz_id, Number(r.global_best) || 0);
         });
 
-        // 4) Compose rows (keep raw numbers for logic; format in render)
-        const composed = quizIds
+        // 4) Compose rows incl. your streaks (no global streaks)
+        const composed: LeaderRow[] = quizIds
           .map(qid => {
-            const yourBestRaw = yourBest.get(qid)!.best;
-            const globalBestRaw = globalBestMap.get(qid) ?? yourBestRaw; // fallback shouldn't happen, but safe
+            const y = yourByQuiz.get(qid)!;
+            const { best: yourBestStreak, current: yourCurrentStreak } = computeBestAndCurrentStreak(y.days);
             return {
               quiz_id: qid,
-              title: yourBest.get(qid)!.title,
-              yourBestRaw,
-              globalBestRaw,
+              title: y.title,
+              yourBestRaw: y.bestFluency,
+              globalBestRaw: globalBestFluency.get(qid) ?? y.bestFluency,
+              yourBestStreak,
+              yourCurrentStreak
             };
           })
-          .sort((a, b) => a.title.localeCompare(b.title));
+          // 🔽 sort by your best fluency (descending)
+          .sort((a, b) => b.yourBestRaw - a.yourBestRaw);
 
         setRows(composed);
       } catch (e) {
@@ -125,28 +193,27 @@ export default function LeaderboardPage() {
                     <th className="py-2 pr-4">Quiz</th>
                     <th className="py-2 px-4">Your best (c/min)</th>
                     <th className="py-2 px-4">Global best (c/min)</th>
-                    <th className="py-2 pl-4">Status</th>
+                    <th className="py-2 px-4">Your best streak (days)</th>
+                    <th className="py-2 pl-4">Current streak (days)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map(row => {
-                    const youLead = row.yourBestRaw >= row.globalBestRaw; // compare raw numbers
+                    const youLeadFluency = row.yourBestRaw >= row.globalBestRaw;
                     return (
                       <tr key={row.quiz_id} className="border-b last:border-0">
                         <td className="py-2 pr-4 font-medium text-gray-900">{row.title}</td>
                         <td className="py-2 px-4">{row.yourBestRaw.toFixed(1)}</td>
-                        <td className="py-2 px-4">{row.globalBestRaw.toFixed(1)}</td>
-                        <td className="py-2 pl-4">
-                          {youLead ? (
-                            <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
-                              👑 Top score!
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-gray-700 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
-                              🎯 Beat {row.globalBestRaw.toFixed(1)}
+                        <td className="py-2 px-4">
+                          {row.globalBestRaw.toFixed(1)}
+                          {youLeadFluency && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
+                              👑
                             </span>
                           )}
                         </td>
+                        <td className="py-2 px-4">{row.yourBestStreak}</td>
+                        <td className="py-2 pl-4">{row.yourCurrentStreak}</td>
                       </tr>
                     );
                   })}
@@ -154,7 +221,7 @@ export default function LeaderboardPage() {
               </table>
 
               <p className="mt-3 text-xs text-gray-500">
-                Top scorers are entered into the monthly prize draw. Good times make good times (i.e., prizes!)
+                Streaks are counted by calendar day in Europe/London. Multiple attempts in a day count as one day. Top scorers are entered into the monthly prize draw. Good times make good times (i.e., prizes!)
               </p>
             </div>
           )}

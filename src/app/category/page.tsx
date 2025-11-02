@@ -46,7 +46,7 @@ interface AttemptRow {
 
 type PerfStats = {
   bestAccuracy: number | null
-  lastFluency: number | null
+  bestFluency: number | null
 }
 
 function CategoryPageContent() {
@@ -106,7 +106,7 @@ function CategoryPageContent() {
     setPurchasedQuizzes(data || [])
   }
 
-  // Load per-quiz performance for this user (best accuracy & last fluency)
+  // Load per-quiz performance for this user (BEST accuracy & BEST fluency)
   useEffect(() => {
     const loadPerformanceData = async () => {
       if (!user || quizzes.length === 0) return
@@ -127,14 +127,11 @@ function CategoryPageContent() {
       quizzes.forEach(q => {
         const rows = byQuiz.get(q.id) || []
         if (rows.length === 0) {
-          stats[q.id] = { bestAccuracy: null, lastFluency: null }
+          stats[q.id] = { bestAccuracy: null, bestFluency: null }
         } else {
-          const bestAccuracy = Math.max(...rows.map(r => r.accuracy_percentage || 0))
-          const last = [...rows].sort((a, b) => b.completed_at.localeCompare(a.completed_at))[0]
-          stats[q.id] = {
-            bestAccuracy,
-            lastFluency: last?.fluency_rate ?? null,
-          }
+          const bestAccuracy = Math.max(...rows.map(r => r.accuracy_percentage ?? 0))
+          const bestFluency = Math.max(...rows.map(r => r.fluency_rate ?? 0))
+          stats[q.id] = { bestAccuracy, bestFluency }
         }
       })
       setPerfByQuiz(stats)
@@ -205,105 +202,105 @@ function CategoryPageContent() {
 
   // Small quiz card with mastery colour logic + stats
   const SmallQuizCard = ({ quiz }: { quiz: Quiz }) => {
-  const isOwned = user && purchasedQuizzes.some(p => p.quiz_id === quiz.id)
-  const perf = perfByQuiz[quiz.id]
-  const acc = perf?.bestAccuracy ?? null
-  const flu = perf?.lastFluency ?? null
+    const isOwned = user && purchasedQuizzes.some(p => p.quiz_id === quiz.id)
+    const perf = perfByQuiz[quiz.id]
+    const acc = perf?.bestAccuracy ?? null
+    const flu = perf?.bestFluency ?? null
 
-  // fluency aims by type
-  let aim = 8
-  if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'options') aim = 17
-  if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed') aim = 8
+    // fluency aims by type
+    let aim = 8 // MCQ
+    if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'options') aim = 15 // Options aim lowered from 17 → 15
+    if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed') aim = 8 // Typed
 
-  // status colours (bg + border)
-  let bgClass = 'bg-red-50'
-  let borderClass = 'border-red-300'
-  if (acc === 100 && (flu ?? 0) >= aim) {
-    bgClass = 'bg-green-50'
-    borderClass = 'border-green-300'
-  } else if (acc === 100) {
-    bgClass = 'bg-amber-50'
-    borderClass = 'border-amber-300'
-  }
+    // status colours (bg + border) based on BEST fluency + 100% accuracy
+    let bgClass = 'bg-red-50'
+    let borderClass = 'border-red-300'
+    if (acc === 100 && (flu ?? 0) >= aim) {
+      bgClass = 'bg-green-50'
+      borderClass = 'border-green-300'
+    } else if (acc === 100) {
+      bgClass = 'bg-amber-50'
+      borderClass = 'border-amber-300'
+    }
 
-  const badge =
-    (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed')
-      ? 'Typed'
-      : (quiz.quiz_mode === 'banked' ? 'Options' : 'MCQ')
+    const badge =
+      (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed')
+        ? 'Typed'
+        : (quiz.quiz_mode === 'banked' ? 'Options' : 'MCQ')
 
-  const badgeStyle =
-    badge === 'Typed' ? 'bg-purple-100 text-purple-800'
-    : badge === 'Options' ? 'bg-emerald-100 text-emerald-800'
-    : 'bg-blue-100 text-blue-800'
+    const badgeStyle =
+      badge === 'Typed' ? 'bg-purple-100 text-purple-800'
+      : badge === 'Options' ? 'bg-emerald-100 text-emerald-800'
+      : 'bg-blue-100 text-blue-800'
 
-  const bestAccStr = acc !== null ? `${acc}%` : '—'
-  const lastFluStr = flu !== null ? `${flu.toFixed(1)}/min` : '—'
+    const bestAccStr = acc !== null ? `${acc}%` : '—'
+    const bestFluStr = flu !== null ? `${flu.toFixed(1)}/min` : '—'
 
-  return (
-    <div
-      className={[
-        'rounded-xl p-4 border-2 shadow-sm transition-all',
-        bgClass,
-        borderClass,
-        'hover:shadow-md hover:brightness-[0.98]',
-      ].join(' ')}
-      aria-label={`Quiz card: ${quiz.title}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <h4 className="font-semibold text-gray-900 text-sm line-clamp-2">
-          {quiz.title}
-        </h4>
-        <span
-          className={`ml-2 inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full ${badgeStyle}`}
-        >
-          {badge}
-        </span>
-      </div>
-
-      {quiz.description && (
-        <p className="text-xs text-gray-700 mt-1 line-clamp-2">{quiz.description}</p>
-      )}
-
-      {/* Stats */}
-      <div className="mt-3 flex items-center justify-between text-[11px] text-gray-800">
-        <span>⭐ Best: <span className="font-medium">{bestAccStr}</span></span>
-        <span>⚡ Last: <span className="font-medium">{lastFluStr}</span></span>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between">
-        <span className="text-[11px] text-gray-700">
-          {quiz.is_free ? 'Free' : quiz.price ? `£${quiz.price}` : 'Paid'}
-        </span>
-
-        {isOwned ? (
-          <button
-            onClick={() => startQuiz(quiz.id)}
-            className="text-xs px-3 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+    return (
+      <div
+        className={[
+          'rounded-xl p-4 border-2 shadow-sm transition-all',
+          bgClass,
+          borderClass,
+          'hover:shadow-md hover:brightness-[0.98]',
+        ].join(' ')}
+        aria-label={`Quiz card: ${quiz.title}`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <h4 className="font-semibold text-gray-900 text-sm line-clamp-2">
+            {quiz.title}
+          </h4>
+          <span
+            className={`ml-2 inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full ${badgeStyle}`}
           >
-            Take Quiz
-          </button>
-        ) : quiz.is_free ? (
-          <button
-            onClick={() => startQuiz(quiz.id)}
-            className="text-xs px-3 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700"
-          >
-            Start
-          </button>
-        ) : (
-          <div className="min-w-[96px]">
-            <PaymentButton
-              quizId={quiz.id}
-              price={quiz.price}
-              title={quiz.title}
-              className="w-full !text-xs !py-1"
-              onAuthRequired={() => handleAuthModalOpen('register')}
-            />
-          </div>
+            {badge}
+          </span>
+        </div>
+
+        {quiz.description && (
+          <p className="text-xs text-gray-700 mt-1 line-clamp-2">{quiz.description}</p>
         )}
+
+        {/* Stats */}
+        <div className="mt-3 flex items-center justify-between text-[11px] text-gray-800">
+          <span>⭐ Best Acc: <span className="font-medium">{bestAccStr}</span></span>
+          <span>⚡ Best Fluency: <span className="font-medium">{bestFluStr}</span></span>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
+          <span className="text-[11px] text-gray-700">
+            {quiz.is_free ? 'Free' : quiz.price ? `£${quiz.price}` : 'Paid'}
+          </span>
+
+          {isOwned ? (
+            <button
+              onClick={() => startQuiz(quiz.id)}
+              className="text-xs px-3 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              Take Quiz
+            </button>
+          ) : quiz.is_free ? (
+            <button
+              onClick={() => startQuiz(quiz.id)}
+              className="text-xs px-3 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Start
+            </button>
+          ) : (
+            <div className="min-w-[96px]">
+              <PaymentButton
+                quizId={quiz.id}
+                price={quiz.price}
+                title={quiz.title}
+                className="w-full !text-xs !py-1"
+                onAuthRequired={() => handleAuthModalOpen('register')}
+              />
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  )
-}
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -418,7 +415,7 @@ function CategoryPageContent() {
           <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
             {category?.name} Quizzes
           </h2>
-          <p className="text-base text-gray-600 max-w-3xl mx-auto">
+        <p className="text-base text-gray-600 max-w-3xl mx-auto">
             Turn your quiz cards from <span className="font-semibold text-red-600">red</span> ➜ <span className="font-semibold text-amber-600">amber</span> ➜ <span className="font-semibold text-green-600">green</span> by mastering fluency and accuracy!
           </p>
         </div>
@@ -518,4 +515,3 @@ export default function CategoryPage() {
     </Suspense>
   )
 }
-
