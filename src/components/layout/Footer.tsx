@@ -19,7 +19,7 @@ export default function Footer() {
               height={24}
               className="w-6 h-6"
             />
-            <span className="text-gray-600">© 2025 optibl</span>
+            <span className="text-gray-600">© 2026 optibl</span>
           </div>
           
           <div className="flex space-x-6 text-sm">

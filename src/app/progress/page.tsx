@@ -33,7 +33,7 @@ export default function ProgressPage() {
   const router = useRouter();
   const loadingRef = useRef(false);
   const [fromDate, setFromDate] = useState<string | null>(null);
-
+  const [studyCondition, setStudyCondition] = useState<string | null>(null);
 
   const loadAttempts = async (): Promise<void> => {
     if (!user) return;
@@ -82,18 +82,30 @@ export default function ProgressPage() {
   };
 
   useEffect(() => {
-    setFromDate(null);
-  }, [selectedQuiz]);
-
-
-  useEffect(() => {
+  async function initialiseProgressPage() {
     if (!user) {
       router.push('/');
       return;
     }
+
+    const { data: participant, error } = await supabase
+      .from('study_participants')
+      .select('condition, study_active')
+      .eq('user_id', user.id)
+      .single();
+
+    if (error) {
+      console.error('Error loading study participant:', error);
+    } else if (participant?.study_active === true) {
+      setStudyCondition(participant.condition);
+    }
+
     void loadAttempts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }
+
+  void initialiseProgressPage();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [user]);
 
   const getUniqueQuizzes = (): Array<[string, string]> => {
     const quizMap = new Map<string, string>();
@@ -467,12 +479,14 @@ if (corrX && corrX < 1.1 && errX && errX > 1.2) {
     </div>
 
     <div className="flex items-center gap-2">
-      <Link
-        href="/leaderboard"
-        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-      >
-        Leaderboard
-      </Link>
+      {studyCondition === 'leaderboard' && (
+  <Link
+    href="/leaderboard"
+    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+  >
+    Leaderboard
+  </Link>
+)}
       <Link
         href="/"
         className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"

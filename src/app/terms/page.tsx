@@ -8,7 +8,7 @@ export default function TermsPage() {
     <PageLayout>
       <div className="max-w-3xl mx-auto px-4 py-12">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Terms of Use</h1>
-        <p className="text-gray-600 mb-8">Effective: 20 September 2025</p>
+        <p className="text-gray-600 mb-8">Effective: 01 June 2026</p>
 
         <div className="space-y-6 text-gray-800 leading-relaxed">
           <p>

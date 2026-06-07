@@ -473,7 +473,7 @@ const loadPurchasedQuizzes = async () => {
                   <p className="text-gray-600">We&apos;re preparing amazing content for you. Check back soon!</p>
                 </div>
               ) : (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
                   {categories.map((category) => {
                     const quizCount = category.quizzes?.[0]?.count || 0
                     
@@ -481,19 +481,15 @@ const loadPurchasedQuizzes = async () => {
                       <div
                         key={category.id}
                         onClick={() => handleCategoryClick(category.id, category.name)}
-                        className="group bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-200/50 hover:border-gray-300 transform hover:-translate-y-2"
+                        className="group bg-white/70 backdrop-blur-sm rounded-2xl p-5 shadow-xl hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-200/50 hover:border-gray-300 transform hover:-translate-y-2"
                       >
                         <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4 transition-all duration-300">
                           <span className="text-white text-2xl">📚</span>
                         </div>
                         
-                        <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-gray-700 transition-colors">
+                        <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors">
                           {category.name}
                         </h3>
-                        
-                        <p className="text-gray-600 mb-6 text-sm leading-relaxed">
-                          {category.description}
-                        </p>
                         
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-gray-500">

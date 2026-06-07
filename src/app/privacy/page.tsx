@@ -7,7 +7,7 @@ export default function PrivacyPage() {
     <PageLayout>
       <div className="max-w-3xl mx-auto px-4 py-12">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Privacy Notice</h1>
-        <p className="text-gray-600 mb-8">Effective: 20 September 2025</p>
+        <p className="text-gray-600 mb-8">Effective: 01 June 2026</p>
 
         <div className="space-y-6 text-gray-800 leading-relaxed">
           <p>
@@ -18,7 +18,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold mb-2">What we collect</h2>
             <ul className="list-disc list-inside space-y-1">
-              <li>Your account details (email and optional name) via Supabase Auth.</li>
+              <li>Your anonymised account details.</li>
               <li>Your quiz activity (attempts, scores, timing, and responses) to show your progress.</li>
               <li>Basic technical logs needed to keep the service running (e.g., error logs).</li>
             </ul>
@@ -27,7 +27,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold mb-2">What we do <em>not</em> collect</h2>
             <ul className="list-disc list-inside space-y-1">
-              <li>No payment details (there are no paid features in this pilot).</li>
+              <li>No personal details that would allow you to be identified.</li>
               <li>No advertising or third-party tracking cookies.</li>
               <li>No analytics tools (e.g., Google Analytics) during the pilot.</li>
             </ul>
@@ -44,16 +44,14 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold mb-2">How we use your data</h2>
             <p>
-              To operate the site, show your progress, improve reliability, and respond to support requests. We do not
-              sell your data.
+              To operate the site, show your progress, improve reliability, and respond to support requests.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold mb-2">Retention</h2>
             <p>
-              Account and quiz data are kept while you have an account. You can ask us to delete your account and data
-              at any time.
+              Your anonymised quiz data are kept while you are participating in the study.
             </p>
           </section>
 
