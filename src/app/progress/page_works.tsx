@@ -23,33 +23,6 @@ interface QuizAttempt {
   } | null;
 }
 
-// --- robust celeration estimator (Theil–Sen) ---------------------------------
-// Median of pairwise slopes: resistant to outlier days (~29% breakdown point),
-// deterministic, no tuning. Used everywhere a celeration slope is computed so
-// the stat card, the chart lines, and the advice all agree.
-function medianOf(arr: number[]): number {
-  const s = [...arr].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-
-// x in weeks, y in log10(rate). Returns slope & intercept on the log10 scale.
-function theilSenFit(
-  x: number[],
-  y: number[],
-): { slope: number; intercept: number } | null {
-  const slopes: number[] = [];
-  for (let i = 0; i < x.length; i++) {
-    for (let j = i + 1; j < x.length; j++) {
-      if (x[j] !== x[i]) slopes.push((y[j] - y[i]) / (x[j] - x[i]));
-    }
-  }
-  if (!slopes.length) return null;
-  const slope = medianOf(slopes);
-  const intercept = medianOf(y.map((yi, i) => yi - slope * x[i]));
-  return { slope, intercept };
-}
-
 export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -270,210 +243,212 @@ const computeCorrectCeleration = ():
   const x = data.map(d => (d.t - first) / (7 * dayMs));
   const y = data.map(d => Math.log10(Math.max(0.1, d.fluency)));
 
-  const fit = theilSenFit(x, y); // robust slope (median of pairwise slopes)
-  if (!fit) return null;
-
-  return { factorPerWeek: Math.pow(10, fit.slope), pointsUsed: x.length };
-};
-
-  // ---------------------------------------------------------------------------
-  // Precision-teaching advice.
-  //
-  // Design: classify the learning picture, then emit EXACTLY ONE primary
-  // recommendation from a set of mutually exclusive branches (ordered by
-  // severity), followed by a few secondary notes that are suppressed whenever
-  // we've told the learner to advance. This guarantees "advance / raise aim"
-  // can never co-occur with "make it easier / slice back / shorten timings".
-  // ---------------------------------------------------------------------------
-  function getPTAdviceForApp(opts: {
-    chartData: { t: number; fluency: number; errorRate: number }[]; // daily, oldest -> newest
-    correctCeleration?: { slope: number } | null; // per-week on log10 scale
-    errorCeleration?: { slope: number } | null;
-    aim?: number;       // single canonical correct-rate aim (per min)
-    aimError?: number;  // error-rate ceiling (per min)
-  }): { picture: string | null; tips: string[] } {
-    const {
-      chartData,
-      correctCeleration,
-      errorCeleration,
-      aim = 20,        // match the chart's aim line and the ×1.4 ideal projection
-      aimError = 1,
-    } = opts;
-
-    if (chartData.length < 2) return { picture: null, tips: [] };
-
-    // ---- derived metrics ----
-    const corrX = correctCeleration ? Math.pow(10, correctCeleration.slope) : null; // ×/week
-    const errX = errorCeleration ? Math.pow(10, errorCeleration.slope) : null;
-
-    const last = chartData[chartData.length - 1];
-    const last3 = chartData.slice(-3);
-    const last7 = chartData.slice(-7);
-    const recent5 = chartData.slice(-5);
-
-    const daysAboveAim = last7.filter((d) => d.fluency >= aim).length;
-    const atAimLast3 =
-      last3.filter((d) => d.fluency >= aim && d.errorRate <= aimError).length >= 2;
-
-    const flatLast3 =
-      last3.length === 3 &&
-      (() => {
-        const f = last3.map((d) => d.fluency);
-        return Math.max(...f) / Math.max(Math.min(...f), 0.1) < 1.1; // within ±10%
-      })();
-
-    // bounce / coefficient of variation over the last 5
-    const mean = recent5.reduce((s, d) => s + d.fluency, 0) / recent5.length;
-    const sd =
-      recent5.length > 1
-        ? Math.sqrt(
-            recent5.reduce((s, d) => s + (d.fluency - mean) ** 2, 0) /
-              (recent5.length - 1),
-          )
-        : 0;
-    const cv = mean > 0 ? sd / mean : 0;
-
-    // recent timing length — reads filteredAttempts from the enclosing component
-    // (newest -> oldest), same as the original helper.
-    const kDur = Math.min(3, filteredAttempts.length);
-    const avgDurationMin =
-      kDur > 0
-        ? filteredAttempts
-            .slice(0, kDur)
-            .reduce((s, a) => s + (a.total_time_minutes || 1), 0) / kDur
-        : 0;
-
-    // plateau: recent vs prior 7-day window (needs >= 10 daily points)
-    const slopeOLS = (y: number[]): number | null => {
-      const n = y.length;
-      if (n < 2) return null;
-      let sx = 0,
-        sy = 0,
-        sxy = 0,
-        sx2 = 0;
-      for (let i = 0; i < n; i++) {
-        sx += i;
-        sy += y[i];
-        sxy += i * y[i];
-        sx2 += i * i;
-      }
-      const d = n * sx2 - sx * sx;
-      if (d === 0) return null;
-      return (n * sxy - sx * sy) / d;
-    };
-    let plateau = false;
-    if (chartData.length >= 10) {
-      const r = slopeOLS(chartData.slice(-7).map((d) => Math.log10(Math.max(0.1, d.fluency))));
-      const p = slopeOLS(chartData.slice(-14, -7).map((d) => Math.log10(Math.max(0.1, d.fluency))));
-      plateau = r !== null && p !== null && Math.abs(r) < 0.02 && Math.abs(p) > 0.05;
-    }
-
-    // crossover / persistent errors / retention dip
-    const crossover = last.fluency < last.errorRate;
-    const persistentErrors = chartData.slice(-3).every((d) => d.errorRate > 2);
-    let retentionDrop = false;
-    if (chartData.length > 7) {
-      const wk = chartData[chartData.length - 8];
-      retentionDrop = last.fluency < wk.fluency * 0.8;
-    }
-
-    // ---- learning picture (2x2 on celerations) ----
-    let picture: string | null = null;
-    if (corrX !== null && errX !== null) {
-      if (corrX > 1.4 && errX < 0.7) picture = 'Strong Jaws (excellent progress)';
-      else if (corrX > 1.25 && errX < 0.9) picture = 'Jaws (good progress)';
-      else if (corrX > 1.0 && errX < 1.0) picture = 'Weak Jaws (marginal progress)';
-      else if (corrX > 1.0 && errX > 1.0) picture = 'Both rising (watch errors)';
-      else if (corrX < 1.0 && errX < 1.0) picture = 'Both falling (stall/dive)';
-      else if (corrX < 1.0 && errX > 1.0) picture = 'Opposition (trouble)';
-    }
-
-    // ---- PRIMARY recommendation: exactly one, mutually exclusive ----
-    const tips: string[] = [];
-    const errorsControlled =
-      (errX === null || errX <= 1.0) && last.errorRate <= aimError;
-    const correctsHealthy = corrX !== null && corrX >= 1.25;
-    const canAdvance =
-      correctsHealthy && errorsControlled && (atAimLast3 || daysAboveAim >= 5);
-
-    if (crossover || persistentErrors) {
-      tips.push(
-        'Stop and reteach: errors are at or above corrects. Drop back to an errorless format (model → guided → independent) on the missed items before timing again.',
-      );
-    } else if (
-      picture === 'Opposition (trouble)' ||
-      (corrX !== null && corrX < 1.0 && errX !== null && errX > 1.1)
-    ) {
-      tips.push(
-        `Opposition pattern (corrects ×${corrX!.toFixed(2)}/wk, errors ×${errX!.toFixed(
-          2,
-        )}/wk): slice the skill finer and pre-teach the confusable items with immediate correction.`,
-      );
-    } else if (errX !== null && errX > 1.1) {
-      tips.push(
-        `Errors accelerating (×${errX.toFixed(
-          2,
-        )}/wk): keep the correct practice but add a short corrective block on the items that miss — log which items so the next set targets them.`,
-      );
-    } else if (canAdvance) {
-      tips.push(
-        `At aim with corrects rising (×${corrX!.toFixed(
-          2,
-        )}/wk) and errors controlled — advance to the next set or raise the aim to ~${aim + 5}/min.`,
-      );
-    } else if (correctsHealthy) {
-      tips.push(
-        `On track (corrects ×${corrX!.toFixed(
-          2,
-        )}/wk, errors controlled). Hold the current programme; you're climbing toward the ${aim}/min aim.`,
-      );
-    } else if (plateau) {
-      tips.push(
-        "Celeration has flattened after earlier growth — run a brief 'slice back' (slightly easier set for ~3 days) to rebuild momentum, then resume.",
-      );
-    } else if (last.fluency < 10 && (corrX === null || corrX < 1.25)) {
-      tips.push(
-        'Low and slow: corrects are low with little acceleration. Add brief untimed "see item → say answer" drills between daily timings to build the base rate.',
-      );
-    } else if (corrX !== null && corrX < 1.25) {
-      tips.push(
-        `Corrects building slowly (×${corrX.toFixed(
-          2,
-        )}/wk, below ×1.25): increase practice opportunities or shorten sets so more reps fit each timing.`,
-      );
-    } else if (flatLast3) {
-      tips.push(
-        'Three flat days of corrects — change one thing (slice the skill finer or lift reinforcement density) rather than repeating the same timing.',
-      );
-    } else {
-      tips.push('Maintain course and keep logging misses for targeted review.');
-    }
-
-    // ---- SECONDARY notes: suppressed entirely when advancing, so no mixed signals ----
-    if (!canAdvance) {
-      if (avgDurationMin > 1 && last.fluency < aim * 0.7) {
-        tips.push(
-          'Timings are long and well below aim — try shorter 30-second sprints to lift the rate before extending duration.',
-        );
-      }
-      if (cv > 0.5 && recent5.length >= 3) {
-        tips.push(
-          'High day-to-day bounce — standardise the conditions (same time/place, brief warm-up, identical timing length).',
-        );
-      } else if (cv > 0.3 && recent5.length >= 3) {
-        tips.push(
-          'Moderate bounce — add a fixed 2–3 item warm-up before each timing to settle variability.',
-        );
-      }
-      if (retentionDrop) {
-        tips.push(
-          'Today is >20% below a week ago — add a short retention check / review block on earlier items.',
-        );
-      }
-    }
-
-    return { picture, tips };
+  const n = x.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += x[i]; sumY += y[i]; sumXY += x[i] * y[i]; sumX2 += x[i] * x[i];
   }
+  const denom = n * sumX2 - sumX * sumX;
+  if (denom === 0) return null;
+
+  const slopePerWeek = (n * sumXY - sumX * sumY) / denom; // log10 scale
+  const factorPerWeek = Math.pow(10, slopePerWeek);        // × per week
+
+ 
+  return { factorPerWeek, pointsUsed: n };
+};
+ // Put this inside ProgressPage, above the big return (function declaration style)
+function getPTAdviceForApp(opts: {
+  chartData: { t: number; fluency: number; errorRate: number }[]; // daily points, oldest -> newest
+  correctCeleration?: { slope: number } | null; // per-week on log10 scale
+  errorCeleration?: { slope: number } | null;
+  aimFluency?: number;  // default 25/min
+  aimError?: number;    // default 1/min
+}): { picture: string | null; tips: string[] } {
+  const {
+    chartData,
+    correctCeleration,
+    errorCeleration,
+    aimFluency = 20,
+    aimError = 1,
+  } = opts;
+
+  const tips: string[] = [];
+  if (chartData.length < 2) return { picture: null, tips };
+
+  const last3 = chartData.slice(-3);
+  const last = chartData[chartData.length - 1];
+
+  // helpers
+  const corrX = correctCeleration ? Math.pow(10, correctCeleration.slope) : null; // ×/week
+  const errX  = errorCeleration    ? Math.pow(10, errorCeleration.slope)    : null;
+
+  // Compute recent average duration from the raw attempts (newest first)
+const aimFluencylocal = 20; // or whatever you pass into the helper
+const kDur = Math.min(3, filteredAttempts.length);
+const avgDurationMin =
+  kDur > 0
+    ? filteredAttempts
+        .slice(0, kDur) // newest k
+        .reduce((s, a) => s + (a.total_time_minutes || 1), 0) / kDur
+    : 0;
+
+// Use the last daily point's fluency from the chartData
+const lastFluency = chartData.length ? chartData[chartData.length - 1].fluency : 0;
+
+// Long timing + below aim → suggest shorter sprints
+if (avgDurationMin > 1 && lastFluency < aimFluencylocal * 0.7) {
+  tips.push(
+    "Long timing + below aim — build endurance gradually. Start with 30-second sprints."
+  );
+}
+
+  // learning picture label (simple 2x2 on celerations)
+  let picture: string | null = null;
+if (corrX !== null && errX !== null) {
+  if (corrX > 1.4 && errX < 0.7) {
+    picture = "Strong Jaws (excellent progress)";
+  } else if (corrX > 1.25 && errX < 0.9) {
+    picture = "Jaws (good progress)";
+  } else if (corrX > 1.0 && errX < 1.0) {
+    picture = "Weak Jaws (marginal progress)";
+  } else if (corrX > 1.0 && errX > 1.0) {
+    picture = "Both rising (watch errors)";
+  } else if (corrX < 1.0 && errX < 1.0) {
+    picture = "Both falling (stall/dive)";
+  } else if (corrX < 1.0 && errX > 1.0) {
+    picture = "Opposition (trouble)";
+  }
+}
+
+
+// --- Aim line crossover: 5 of last 7 at/above aim ---
+const daysAboveAim = chartData.slice(-7).filter(d => d.fluency >= aimFluency).length;
+if (daysAboveAim >= 5) {
+  tips.push(`5+ days above aim — advance to harder material or raise aim to ~${aimFluency + 10}/min.`);
+}
+
+// helper: OLS slope over equally spaced points (returns slope on log10 scale per point)
+function slopeOLS(y: number[]): number | null {
+  const n = y.length;
+  if (n < 2) return null;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    const x = i, yi = y[i];
+    sumX += x; sumY += yi; sumXY += x * yi; sumX2 += x * x;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  if (denom === 0) return null;
+  return (n * sumXY - sumX * sumY) / denom;
+}
+
+// --- Plateau detection: recent vs prior window ---
+if (chartData.length >= 10) {
+  // Use log10(corrects) to mirror SCC logic
+  const recent7 = chartData.slice(-7).map(d => Math.log10(Math.max(0.1, d.fluency)));
+  const prior7  = chartData.slice(-14, -7).map(d => Math.log10(Math.max(0.1, d.fluency)));
+
+  const recentSlope = slopeOLS(recent7);   // per-point (≈ per session/day)
+  const priorSlope  = slopeOLS(prior7);
+
+  // thresholds: ~flat if |m| < 0.02 (≈ ×1.05/day). Prior was clearly rising if > 0.05 (~×1.12/day).
+  if (
+    recentSlope !== null && priorSlope !== null &&
+    Math.abs(recentSlope) < 0.02 && Math.abs(priorSlope) > 0.05
+  ) {
+    tips.push("Celeration flattened — implement a quick 'slice back' protocol: slightly easier set for ~3 days to rebuild momentum, then resume.");
+  }
+}
+
+
+  // decision checks
+  const atAimLast3 =
+    last3.filter(d => d.fluency >= aimFluency && d.errorRate <= aimError).length >= 2;
+
+  const flatLast3 = last3.length === 3 ? (() => {
+    const arr = last3.map(d => d.fluency);
+    const max = Math.max(...arr), min = Math.min(...arr);
+    return max / Math.max(min, 0.1) < 1.10; // within ±10%
+  })() : false;
+
+  // bounce (variability) over last 5
+  const recent = chartData.slice(-5);
+  const mean = recent.reduce((s,d)=>s+d.fluency,0) / recent.length;
+  const sd = recent.length > 1
+    ? Math.sqrt(recent.reduce((s,d)=>s + (d.fluency - mean)**2, 0) / (recent.length - 1))
+    : 0;
+  const cv = mean > 0 ? sd / mean : 0; // coefficient of variation
+
+  // tips (no miss-only timings; focus on noting/correcting errors and shaping corrects)
+  if (picture === "Jaws (corrects ↑, errors ↓)") {
+    tips.push(`Healthy pattern (${corrX!.toFixed(2)}× corrects, ${errX!.toFixed(2)}× errors) — keep course.`);
+    if (atAimLast3) tips.push("At aim on 2 of last 3 — consider raising the aim or moving to next set.");
+  }
+
+  if (corrX !== null && corrX < 1.25) {
+    tips.push(`Corrects celeration is ×${corrX.toFixed(2)}/week (<×1.25) — adjust instruction: shorten sets, increase opportunities, or add brief extra practice blocks.`);
+  }
+
+  if (errX !== null && errX > 1.10) {
+    tips.push(`Errors accelerating (×${errX.toFixed(2)}/week) — ensure immediate corrective feedback is noted and rehearsed (model → guided → independent), and consider simplifying or pre-teaching tricky items.`);
+  }
+
+  if (last.errorRate > aimError) {
+    tips.push(`Errors above aim (>${aimError}/min) — tighten prompts and modeling on missed items; log which items miss so the next set emphasises those.`);
+  }
+
+  if (flatLast3) {
+    tips.push("Three days of flat corrects — change something (slice the skill finer, adjust timing length, or increase reinforcement density).");
+  }
+
+  if (cv > 0.5 && recent.length >= 3) {
+    tips.push("High variability — standardize timing conditions (same time/place, brief warm-up) and ensure consistent timing length.");
+  }
+
+  if (!tips.length) {
+    tips.push("Maintain course and keep logging misses for targeted review.");
+  }
+
+  // Crossover detection
+if (last.fluency < last.errorRate) {
+  tips.push("CRITICAL: Errors exceed corrects - stop and reteach. This indicates guessing or confusion.");
+}
+
+// Ignore/junk detection (classic PT marker)
+if (corrX && corrX > 1.5 && errX && errX > 1.5) {
+  tips.push("Both accelerating rapidly - possible 'ignore' pattern. Check if learner is rushing without reading.");
+}
+
+// Retention check
+if (chartData.length > 7) {
+  const weekAgo = chartData[chartData.length - 8];
+  if (last.fluency < weekAgo.fluency * 0.8) {
+    tips.push("Performance dropped >20% from a week ago - review retention strategies.");
+  }
+}
+
+// Low frequency + slow acceleration
+if (last.fluency < 10 && corrX !== null && corrX < 1.25) {
+  tips.push("Low frequency of corrects + slow acceleration — add brief untimed practice between daily timings. Use 'see item → say answer' drills during the day.");
+}
+
+// Moderate bounce
+if (cv !== null && cv > 0.3 && cv <= 0.5) {
+  tips.push("Moderate bounce — standardize the pre-timing routine. Try 2–3 quick practice items before starting.");
+}
+
+// Persistent errors
+if (chartData.slice(-3).every(d => d.errorRate > 2)) {
+  tips.push("Consistent errors >2/min for 3 days - create separate practice for frequently missed items. Consider errorless teaching procedures.");
+}
+
+// Error acceleration without correct acceleration
+if (corrX && corrX < 1.1 && errX && errX > 1.2) {
+  tips.push("Errors growing faster than corrects - possible fatigue or item confusion. Shorten timing to 30 seconds or clarify similar items.");
+}
+
+  return { picture, tips };
+}
 
   if (loading) {
     return (
@@ -801,12 +776,22 @@ const calculateCeleration = (
 ): { slope: number; intercept: number } | null => {
   if (data.length < 2) return null;
 
-  const firstT = data[0].t;
-  const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
-  const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
+const firstT = data[0].t;
+const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
+const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
 
-  // Theil–Sen robust fit (slope & intercept on log10 scale, per week)
-  return theilSenFit(xWeeks, yVals);
+  const n = xWeeks.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    const x = xWeeks[i], y = yVals[i];
+    sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  if (denom === 0) return null;
+
+  const slope = (n * sumXY - sumX * sumY) / denom; // pp on log10 scale per week
+  const intercept = (sumY - slope * sumX) / n;
+  return { slope, intercept };
 };
 
         // 3b — celerations before/after the selected date
@@ -816,8 +801,20 @@ const correctCelAfter  = postData.length > 1 ? calculateCeleration(postData)    
 const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, true): null;
 
 
-
-
+                                
+                                const getIdealProjection = (): number | null => {
+                                  if (!chartData.length) return null;
+                                  const lastData =
+                                    chartData[chartData.length - 1];
+                                  const daysSinceStart =
+                                    chartData.length - 1;
+                                  const idealMultiplier = Math.pow(
+                                    1.4,
+                                    daysSinceStart / 7,
+                                  );
+                                  return lastData.fluency * idealMultiplier;
+                                };
+                                const nextTarget: number | null = getIdealProjection();
 
 
                                 return (
@@ -1187,14 +1184,21 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
   });
   const chartData = Array.from(daily.values());
 
-  // same robust fit the chart uses, so advice and chart never disagree
+  // same calc you use in the SVG
   const dayMs = 86_400_000;
   const calc = (data: typeof chartData, useErrors = false) => {
     if (data.length < 2) return null;
     const first = data[0].t;
     const xWeeks = data.map(d => (d.t - first) / (7 * dayMs));
     const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
-    return theilSenFit(xWeeks, yVals);
+    const n = xWeeks.length;
+    let sumX=0,sumY=0,sumXY=0,sumX2=0;
+    for (let i=0;i<n;i++){ const x=xWeeks[i], y=yVals[i]; sumX+=x; sumY+=y; sumXY+=x*y; sumX2+=x*x; }
+    const denom = n*sumX2 - sumX*sumX;
+    if (denom === 0) return null;
+    const slope = (n*sumXY - sumX*sumY) / denom;
+    const intercept = (sumY - slope*sumX) / n;
+    return { slope, intercept };
   };
 
   const startT = fromDate ? Date.parse(fromDate + 'T00:00:00Z') : NaN;
@@ -1219,7 +1223,7 @@ const { picture, tips } = getPTAdviceForApp({
   chartData: postData,              // ← advice from the selected date onwards
   correctCeleration,
   errorCeleration,
-  aim: 20,
+  aimFluency: 25,
   aimError: 1,
 });
 
@@ -1568,95 +1572,18 @@ const trend =
                                       Celeration lines
                                     </span>
                                   </div>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 rounded-full border-2 border-green-500 border-dashed"></div>
+                                    <span className="text-gray-700">
+                                      Ideal next performance
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
                               <p className="text-xs text-gray-500 mt-3 italic">
                                 Logarithmic scale (0.1-100/min) • One data point recorded per
                                 day (first attempt) • ×1.4/week = excellent progress
                               </p>
-                              {/*
-  Drop-in explainer for the fluency chart.
-  Paste this <details> block directly beneath the Standard Celeration Chart
-  key (the "Logarithmic scale… ×1.4/week = excellent progress" caption), or
-  anywhere inside the fluency-chart card.
-
-  It needs no state and no imports — it uses a native <details>/<summary>.
-  Remove the `open` attribute on the first line if you'd rather it start
-  collapsed for returning users.
-*/}
-
-<details open className="mt-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200 shadow-sm">
-  <summary className="cursor-pointer select-none px-4 py-3 font-semibold text-sm text-gray-800">
-    How to read this chart
-  </summary>
-
-  <div className="px-4 pb-4 text-sm text-gray-700 space-y-3">
-    <p>
-      This is a <span className="font-medium">Standard Celeration Chart</span> — the standard
-      way of tracking fluency. Rather than plotting your score, it plots your{' '}
-      <span className="font-medium">rate</span>: how many correct and incorrect answers you
-      produce per minute in each sprint, and whether that rate is speeding up from week to week.
-    </p>
-
-    <div>
-      <p className="font-medium text-gray-800 mb-2">What the marks mean</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full shadow-sm shrink-0"></div>
-          <span>Your correct answers per minute (one point per day)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-red-500 font-bold text-base shrink-0">×</span>
-          <span>Your errors per minute</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-0.5 bg-gradient-to-r from-green-500 to-green-400 shrink-0"></div>
-          <span>Correct aim — the rate you&rsquo;re working up to (20/min)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-0.5 bg-red-500 shrink-0"></div>
-          <span>Error ceiling — keep errors on or below this (≤1/min)</span>
-        </div>
-      </div>
-    </div>
-
-    <div>
-      <p className="font-medium text-gray-800 mb-1">The scale</p>
-      <p>
-        The vertical axis <span className="font-medium">multiplies</span>: each labelled line is
-        ten times the one below it (0.1, 1, 10, 100). On a scale like this, steady improvement
-        appears as a straight line, and the same amount of climbing means the same{' '}
-        <span className="italic">proportional</span> gain wherever you are on the chart. The
-        horizontal axis is successive calendar weeks.
-      </p>
-    </div>
-
-    <div>
-      <p className="font-medium text-gray-800 mb-1">Your celeration (the ×/week number)</p>
-      <p>
-        The dashed trend line is your <span className="font-medium">celeration</span> — the slope
-        of your progress. Because the chart multiplies, it&rsquo;s read as a multiplier per week.
-        For corrects, ×1.0 means flat and a number above it means you&rsquo;re accelerating
-        (around ×1.4/week is excellent — roughly a 40% lift each week). For errors you want the
-        opposite: a number <span className="italic">below</span> ×1.0 means your mistakes are
-        dividing away week by week. The line is fitted with a method that shrugs off the odd
-        off-day, and it becomes more trustworthy the more sprints you log.
-      </p>
-    </div>
-
-    <div>
-      <p className="font-medium text-gray-800 mb-1">Comparing before and after a change</p>
-      <p>
-        Use <span className="font-medium">Show celeration from</span> to pick a date and split
-        your record. Earlier points fade but stay for context, and the trend is recalculated from
-        that date forward, with the before and after slopes shown side by side. It&rsquo;s the
-        quickest way to see whether something you changed — a new set, a different study routine —
-        actually moved your celeration.
-      </p>
-    </div>
-  </div>
-</details>
-
                             </>
                           ) : (
                             <>
@@ -1702,3 +1629,4 @@ const trend =
     </div>
   );
 }
+
