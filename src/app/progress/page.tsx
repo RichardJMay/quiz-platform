@@ -768,7 +768,7 @@ const spanDays = chartData.length
   : 1;
 
 const offsetDays = 1; // left pad in “days”
-const daysToShow = Math.max(140, spanDays);
+const daysToShow = Math.max(70, spanDays);
 const xStep = chartWidth / (daysToShow + offsetDays);
 const xOffset = offsetDays * xStep;
 
@@ -1599,7 +1599,7 @@ const trend =
     </p>
 
     <div>
-      <p className="font-medium text-gray-800 mb-2">What the marks mean</p>
+      <p className="font-bold text-gray-800 mb-2">What the marks mean</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full shadow-sm shrink-0"></div>
@@ -1621,7 +1621,7 @@ const trend =
     </div>
 
     <div>
-      <p className="font-medium text-gray-800 mb-1">The scale</p>
+      <p className="font-bold text-gray-800 mb-1">The scale</p>
       <p>
         The vertical axis <span className="font-medium">multiplies</span>: each labelled line is
         ten times the one below it (0.1, 1, 10, 100). On a scale like this, steady improvement
@@ -1632,10 +1632,10 @@ const trend =
     </div>
 
     <div>
-      <p className="font-medium text-gray-800 mb-1">Your celeration (the ×/week number)</p>
+      <p className="font-bold text-gray-800 mb-1">Your celeration (the ×/week number)</p>
       <p>
-        The dashed trend line is your <span className="font-medium">celeration</span> — the slope
-        of your progress. Because the chart multiplies, it&rsquo;s read as a multiplier per week.
+        The dashed trend line is your <span className="font-medium">celeration</span> (i.e.,the slope
+        of your progress) Because the chart multiplies, it&rsquo;s read as a multiplier per week.
         For corrects, ×1.0 means flat and a number above it means you&rsquo;re accelerating
         (around ×1.4/week is excellent — roughly a 40% lift each week). For errors you want the
         opposite: a number <span className="italic">below</span> ×1.0 means your mistakes are
@@ -1645,7 +1645,7 @@ const trend =
     </div>
 
     <div>
-      <p className="font-medium text-gray-800 mb-1">Comparing before and after a change</p>
+      <p className="font-bold text-gray-800 mb-1">Comparing before and after a change</p>
       <p>
         Use <span className="font-medium">Show celeration from</span> to pick a date and split
         your record. Earlier points fade but stay for context, and the trend is recalculated from
