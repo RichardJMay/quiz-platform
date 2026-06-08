@@ -50,6 +50,29 @@ function theilSenFit(
   return { slope, intercept };
 }
 
+// --- calendar-day helpers (Europe/London, matches the leaderboard) -----------
+// The chart buckets one point per calendar day AND positions points by calendar
+// day, so both must use the same day definition. Using London days keeps the SCC
+// consistent with the streak/leaderboard logic and avoids a point landing on the
+// wrong day near midnight.
+const toLondonDayKey = (t: number): string => {
+  const d = new Date(
+    new Date(t).toLocaleString('en-US', { timeZone: 'Europe/London' }),
+  );
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// Integer day count for a timestamp, by its London calendar day. The difference
+// between two of these is the exact number of calendar days between them — which
+// is what the x-axis needs (NOT a floored millisecond difference).
+const londonDayNumber = (t: number): number => {
+  const [y, m, d] = toLondonDayKey(t).split('-').map(Number);
+  return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
+};
+
 export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,9 +183,18 @@ export default function ProgressPage() {
         if (!filteredAttempts.length) return null;
     const ts = filteredAttempts.map(a => new Date(a.completed_at).getTime());
     const min = Math.min(...ts), max = Math.max(...ts);
-    const toInput = (t: number) => new Date(t).toISOString().slice(0, 10);
-        return { min: toInput(min), max: toInput(max) };
+        return { min: toLondonDayKey(min), max: toLondonDayKey(max) };
 }, [filteredAttempts]);
+
+  // Default the "Show celeration from" control to the FIRST recorded day, so the
+  // celeration is computed from the start of the record rather than appearing to
+  // begin today. Re-runs when the earliest day or the selected quiz changes; it
+  // won't override a date the user picks within the same quiz (those don't change
+  // dateRange.min). Use "Reset" to switch to the overall (no-split) view.
+  useEffect(() => {
+    if (dateRange?.min) setFromDate(dateRange.min);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange?.min, selectedQuiz]);
 
 
 
@@ -256,18 +288,17 @@ const computeCorrectCeleration = ():
     .reverse()     // oldest → newest for time math
     .forEach(a => {
       const t = new Date(a.completed_at).getTime();
-      const dayKey = new Date(t).toISOString().slice(0, 10); // YYYY-MM-DD
+      const dayKey = toLondonDayKey(t); // London calendar day
       if (!daily.has(dayKey)) daily.set(dayKey, { t, fluency: a.fluency_rate });
     });
 
   const data = Array.from(daily.values()).sort((a, b) => a.t - b.t);
   if (data.length < 2) return null;
 
-  const dayMs = 86_400_000;
-  const first = data[0].t;
+  const firstDayNum = londonDayNumber(data[0].t);
 
-  // x = weeks since first point; y = log10(corrects per min)
-  const x = data.map(d => (d.t - first) / (7 * dayMs));
+  // x = calendar weeks since first point; y = log10(corrects per min)
+  const x = data.map(d => (londonDayNumber(d.t) - firstDayNum) / 7);
   const y = data.map(d => Math.log10(Math.max(0.1, d.fluency)));
 
   const fit = theilSenFit(x, y); // robust slope (median of pairwise slopes)
@@ -729,7 +760,7 @@ const computeCorrectCeleration = ():
   const daily = new Map<string, SCCDatum>(); // key per calendar day
   filteredAttempts.slice().reverse().forEach((attempt) => {
     const ts = new Date(attempt.completed_at).getTime();
-    const dayKey = new Date(ts).toISOString().slice(0, 10); // YYYY-MM-DD
+    const dayKey = toLondonDayKey(ts); // London calendar day
     if (!daily.has(dayKey)) {
       daily.set(dayKey, {
         t: ts,
@@ -757,18 +788,21 @@ const computeCorrectCeleration = ():
                                 const logRange = maxLog - minLog;
 
                                 // --- calendar-based X positioning ---
-                                const dayMs = 86_400_000;
 const firstT = chartData.length ? chartData[0].t : 0;
+const firstDayNum = chartData.length ? londonDayNumber(firstT) : 0;
 
+// Position by CALENDAR-DAY difference (London), not floored milliseconds.
+// The old version floored (t - firstT)/dayMs, so two points on different days
+// less than 24h apart in clock time collapsed onto the same x and overlapped.
 const daysSince = (t: number) =>
-  firstT ? Math.max(0, Math.floor((t - firstT) / dayMs)) : 0;
+  chartData.length ? Math.max(0, londonDayNumber(t) - firstDayNum) : 0;
 
 const spanDays = chartData.length
   ? Math.max(1, daysSince(chartData[chartData.length - 1].t))
   : 1;
 
 const offsetDays = 1; // left pad in “days”
-const daysToShow = Math.max(70, spanDays);
+const daysToShow = Math.max(70, spanDays); // minimum 10 weeks; grows if the record is longer
 const xStep = chartWidth / (daysToShow + offsetDays);
 const xOffset = offsetDays * xStep;
 
@@ -801,11 +835,11 @@ const calculateCeleration = (
 ): { slope: number; intercept: number } | null => {
   if (data.length < 2) return null;
 
-  const firstT = data[0].t;
-  const xWeeks = data.map(d => (d.t - firstT) / (7 * dayMs));
+  const firstDayNumLocal = londonDayNumber(data[0].t);
+  const xWeeks = data.map(d => (londonDayNumber(d.t) - firstDayNumLocal) / 7);
   const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
 
-  // Theil–Sen robust fit (slope & intercept on log10 scale, per week)
+  // Theil–Sen robust fit (slope & intercept on log10 scale, per calendar week)
   return theilSenFit(xWeeks, yVals);
 };
 
@@ -981,7 +1015,7 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
   );
 })}
 
-      {hasStart && (
+      {hasStart && preData.length > 0 && (
   <g>
     <line
       x1={xAt(startT)} y1={startY} x2={xAt(startT)} y2={startY + chartHeight}
@@ -1034,7 +1068,7 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
       10,
       correctCelBefore.intercept +
       correctCelBefore.slope *
-      ((preData[preData.length - 1].t - preData[0].t) / (7 * dayMs))
+      ((londonDayNumber(preData[preData.length - 1].t) - londonDayNumber(preData[0].t)) / 7)
     ))}
     stroke="#6B7280"
     strokeWidth="2"
@@ -1052,7 +1086,7 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
       10,
       errorCelBefore.intercept +
       errorCelBefore.slope *
-      ((preData[preData.length - 1].t - preData[0].t) / (7 * dayMs))
+      ((londonDayNumber(preData[preData.length - 1].t) - londonDayNumber(preData[0].t)) / 7)
     ))}
     stroke="#EF4444"
     strokeWidth="2"
@@ -1071,7 +1105,7 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
       10,
       correctCelAfter.intercept +
       correctCelAfter.slope *
-      ((postData[postData.length - 1].t - postData[0].t) / (7 * dayMs))
+      ((londonDayNumber(postData[postData.length - 1].t) - londonDayNumber(postData[0].t)) / 7)
     ))}
     stroke="url(#blueGradient)"
     strokeWidth="2"
@@ -1089,7 +1123,7 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
       10,
       errorCelAfter.intercept +
       errorCelAfter.slope *
-      ((postData[postData.length - 1].t - postData[0].t) / (7 * dayMs))
+      ((londonDayNumber(postData[postData.length - 1].t) - londonDayNumber(postData[0].t)) / 7)
     ))}
     stroke="#EF4444"
     strokeWidth="2"
@@ -1176,7 +1210,7 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
      const daily = new Map<string, { t: number; fluency: number; errorRate: number }>();
   filteredAttempts.slice().reverse().forEach(a => {
     const t = new Date(a.completed_at).getTime();
-    const key = new Date(t).toISOString().slice(0, 10);
+    const key = toLondonDayKey(t); // London calendar day
     if (!daily.has(key)) {
       daily.set(key, {
         t,
@@ -1188,11 +1222,10 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
   const chartData = Array.from(daily.values());
 
   // same robust fit the chart uses, so advice and chart never disagree
-  const dayMs = 86_400_000;
   const calc = (data: typeof chartData, useErrors = false) => {
     if (data.length < 2) return null;
-    const first = data[0].t;
-    const xWeeks = data.map(d => (d.t - first) / (7 * dayMs));
+    const firstDayNum = londonDayNumber(data[0].t);
+    const xWeeks = data.map(d => (londonDayNumber(d.t) - firstDayNum) / 7);
     const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
     return theilSenFit(xWeeks, yVals);
   };
@@ -1574,89 +1607,6 @@ const trend =
                                 Logarithmic scale (0.1-100/min) • One data point recorded per
                                 day (first attempt) • ×1.4/week = excellent progress
                               </p>
-                              {/*
-  Drop-in explainer for the fluency chart.
-  Paste this <details> block directly beneath the Standard Celeration Chart
-  key (the "Logarithmic scale… ×1.4/week = excellent progress" caption), or
-  anywhere inside the fluency-chart card.
-
-  It needs no state and no imports — it uses a native <details>/<summary>.
-  Remove the `open` attribute on the first line if you'd rather it start
-  collapsed for returning users.
-*/}
-
-<details open className="mt-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200 shadow-sm">
-  <summary className="cursor-pointer select-none px-4 py-3 font-semibold text-sm text-gray-800">
-    How to read this chart
-  </summary>
-
-  <div className="px-4 pb-4 text-sm text-gray-700 space-y-3">
-    <p>
-      This is a <span className="font-medium">Standard Celeration Chart</span> — the standard
-      way of tracking fluency. Rather than plotting your score, it plots your{' '}
-      <span className="font-medium">rate</span>: how many correct and incorrect answers you
-      produce per minute in each sprint, and whether that rate is speeding up from week to week.
-    </p>
-
-    <div>
-      <p className="font-bold text-gray-800 mb-2">What the marks mean</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full shadow-sm shrink-0"></div>
-          <span>Your correct answers per minute (one point per day)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-red-500 font-bold text-base shrink-0">×</span>
-          <span>Your errors per minute</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-0.5 bg-gradient-to-r from-green-500 to-green-400 shrink-0"></div>
-          <span>Correct aim — the rate you&rsquo;re working up to (20/min)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-0.5 bg-red-500 shrink-0"></div>
-          <span>Error ceiling — keep errors on or below this (≤1/min)</span>
-        </div>
-      </div>
-    </div>
-
-    <div>
-      <p className="font-bold text-gray-800 mb-1">The scale</p>
-      <p>
-        The vertical axis <span className="font-medium">multiplies</span>: each labelled line is
-        ten times the one below it (0.1, 1, 10, 100). On a scale like this, steady improvement
-        appears as a straight line, and the same amount of climbing means the same{' '}
-        <span className="italic">proportional</span> gain wherever you are on the chart. The
-        horizontal axis is successive calendar weeks.
-      </p>
-    </div>
-
-    <div>
-      <p className="font-bold text-gray-800 mb-1">Your celeration (the ×/week number)</p>
-      <p>
-        The dashed trend line is your <span className="font-medium">celeration</span> (i.e.,the slope
-        of your progress) Because the chart multiplies, it&rsquo;s read as a multiplier per week.
-        For corrects, ×1.0 means flat and a number above it means you&rsquo;re accelerating
-        (around ×1.4/week is excellent — roughly a 40% lift each week). For errors you want the
-        opposite: a number <span className="italic">below</span> ×1.0 means your mistakes are
-        dividing away week by week. The line is fitted with a method that shrugs off the odd
-        off-day, and it becomes more trustworthy the more sprints you log.
-      </p>
-    </div>
-
-    <div>
-      <p className="font-bold text-gray-800 mb-1">Comparing before and after a change</p>
-      <p>
-        Use <span className="font-medium">Show celeration from</span> to pick a date and split
-        your record. Earlier points fade but stay for context, and the trend is recalculated from
-        that date forward, with the before and after slopes shown side by side. It&rsquo;s the
-        quickest way to see whether something you changed — a new set, a different study routine —
-        actually moved your celeration.
-      </p>
-    </div>
-  </div>
-</details>
-
                             </>
                           ) : (
                             <>

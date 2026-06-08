@@ -223,13 +223,46 @@ export default function LeaderboardPage() {
     return null;
   }
 
+  const leadCount = rows.filter((r) => r.yourBestRaw >= r.globalBestRaw).length;
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* page-load + bar fill animations (subtle, one-shot) */}
+      <style jsx>{`
+        @keyframes riseIn {
+          from {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes barGrow {
+          from {
+            width: 0%;
+          }
+        }
+        .rise {
+          animation: riseIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .bar-fill {
+          animation: barGrow 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+      `}</style>
+
+      {/* Header */}
       <div className="bg-white shadow-sm border-b">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-            Leaderboard
-          </h1>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid place-items-center h-10 w-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 text-white text-xl shadow-sm">
+              🏆
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+              Leaderboard
+            </h1>
+          </div>
 
           <div className="flex gap-2">
             <Link
@@ -249,76 +282,214 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Your quizzes
-            </h3>
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+        {/* Explainer */}
+        <div className="rise rounded-2xl overflow-hidden border border-amber-200 shadow-sm">
+          <div className="bg-gradient-to-r from-amber-50 to-yellow-50 px-5 sm:px-6 py-5 border-b border-amber-100">
+            <h2 className="text-lg font-bold text-gray-900">
+              How the leaderboard works
+            </h2>
+            <p className="text-sm text-gray-700 mt-1">
+              Your quizzes are ranked by <span className="font-semibold">speed with accuracy</span> &mdash; correct
+              answers per minute (c/min) &mdash; and your score is measured against{' '}
+              <span className="font-semibold">everyone else using the platform</span>. Your strongest quiz sits
+              at the top. Close the gap to the platform&rsquo;s best and the crown is yours.
+            </p>
+          </div>
 
-            {loading && (
-              <span className="text-sm text-gray-500">Loading…</span>
-            )}
+          <div className="bg-white px-5 sm:px-6 py-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 text-sm text-gray-700">
+              <div className="flex gap-3">
+                <span className="text-lg leading-none mt-0.5">🎯</span>
+                <p>
+                  <span className="font-bold text-gray-900">Your best</span> &mdash; your fastest accurate run on
+                  a quiz, in correct answers per minute (c/min).
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-lg leading-none mt-0.5">🌍</span>
+                <p>
+                  <span className="font-bold text-gray-900">Platform top</span> &mdash; the best c/min recorded by
+                  any user on that quiz. Fully anonymous; no names are ever shown.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-lg leading-none mt-0.5">📊</span>
+                <p>
+                  <span className="font-bold text-gray-900">Standing</span> &mdash; the bar fills as you close in
+                  on the platform top. The number shows how many c/min you are off the top spot.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-lg leading-none mt-0.5">🔥</span>
+                <p>
+                  <span className="font-bold text-gray-900">Streaks</span> &mdash; days in a row you&rsquo;ve
+                  practised, by London calendar day. Several goes in one day still count as one.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick status strip */}
+        {rows.length > 0 && (
+          <div className="rise grid grid-cols-3 gap-3 sm:gap-4">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 text-center">
+              <div className="text-2xl font-bold text-gray-900">{rows.length}</div>
+              <div className="text-xs text-gray-500 mt-0.5">Quizzes ranked</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 text-center">
+              <div className="text-2xl font-bold text-amber-500">{leadCount}</div>
+              <div className="text-xs text-gray-500 mt-0.5">Top spots held</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 text-center">
+              <div className="text-2xl font-bold text-orange-500">
+                {Math.max(0, ...rows.map((r) => r.yourCurrentStreak))}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">Longest live streak</div>
+            </div>
+          </div>
+        )}
+
+        {/* Rows */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-semibold text-gray-900">Your quizzes</h3>
+            {loading && <span className="text-sm text-gray-500">Loading…</span>}
           </div>
 
           {rows.length === 0 ? (
-            <p className="text-gray-600">
-              No attempts yet. Complete a quiz to join the leaderboard!
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-500 border-b">
-                    <th className="py-2 pr-4">Quiz</th>
-                    <th className="py-2 px-4">Your best (c/min)</th>
-                    <th className="py-2 px-4">Global best (c/min)</th>
-                    <th className="py-2 px-4">Your best streak (days)</th>
-                    <th className="py-2 pl-4">Current streak (days)</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {rows.map((row) => {
-                    const youLeadFluency = row.yourBestRaw >= row.globalBestRaw;
-
-                    return (
-                      <tr key={row.quiz_id} className="border-b last:border-0">
-                        <td className="py-2 pr-4 font-medium text-gray-900">
-                          {row.title}
-                        </td>
-
-                        <td className="py-2 px-4">
-                          {row.yourBestRaw.toFixed(1)}
-                        </td>
-
-                        <td className="py-2 px-4">
-                          {row.globalBestRaw.toFixed(1)}
-
-                          {youLeadFluency && (
-                            <span className="ml-2 inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
-                              👑
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="py-2 px-4">{row.yourBestStreak}</td>
-
-                        <td className="py-2 pl-4">{row.yourCurrentStreak}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              <p className="mt-3 text-xs text-gray-500">
-                Streaks are counted by calendar day in Europe/London. Multiple
-                attempts in a day count as one day. Top scorers are entered into
-                the monthly prize draw. Good times make good times (i.e.,
-                prizes!)
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
+              <div className="text-5xl mb-3">🚀</div>
+              <p className="text-gray-700 font-medium">No attempts yet</p>
+              <p className="text-gray-500 text-sm mt-1">
+                Complete a quiz to claim your place on the leaderboard.
               </p>
             </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-[680px] w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                      <th className="py-3 pl-5 pr-2 w-10 font-semibold">#</th>
+                      <th className="py-3 px-2 font-semibold">Quiz</th>
+                      <th className="py-3 px-2 text-right font-semibold whitespace-nowrap">
+                        Your best
+                      </th>
+                      <th className="py-3 px-2 text-right font-semibold whitespace-nowrap">
+                        Platform top
+                      </th>
+                      <th className="py-3 px-2 font-semibold w-[32%]">
+                        Standing
+                      </th>
+                      <th className="py-3 px-2 pr-5 text-right font-semibold whitespace-nowrap">
+                        Streak
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {rows.map((row, i) => {
+                      const youLead = row.yourBestRaw >= row.globalBestRaw;
+                      const pct =
+                        row.globalBestRaw > 0
+                          ? Math.min(100, (row.yourBestRaw / row.globalBestRaw) * 100)
+                          : 100;
+                      const gap = Math.max(0, row.globalBestRaw - row.yourBestRaw);
+
+                      return (
+                        <tr
+                          key={row.quiz_id}
+                          className="rise border-b border-gray-50 last:border-0 hover:bg-gray-50/70 transition-colors"
+                          style={{ animationDelay: `${Math.min(i * 35, 280)}ms` }}
+                        >
+                          {/* rank */}
+                          <td className="py-3 pl-5 pr-2">
+                            <span
+                              className={`inline-grid place-items-center h-6 w-6 rounded-full text-xs font-bold ${
+                                i === 0
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-gray-100 text-gray-500'
+                              }`}
+                            >
+                              {i + 1}
+                            </span>
+                          </td>
+
+                          {/* quiz title + crown */}
+                          <td className="py-3 px-2 font-medium text-gray-900">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="truncate">{row.title}</span>
+                              {youLead && (
+                                <span
+                                  className="shrink-0"
+                                  title="You hold the platform top score"
+                                >
+                                  👑
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* your best */}
+                          <td className="py-3 px-2 text-right font-bold text-gray-900 whitespace-nowrap tabular-nums">
+                            {row.yourBestRaw.toFixed(1)}
+                          </td>
+
+                          {/* platform top */}
+                          <td className="py-3 px-2 text-right text-gray-500 whitespace-nowrap tabular-nums">
+                            {row.globalBestRaw.toFixed(1)}
+                          </td>
+
+                          {/* standing bar */}
+                          <td className="py-3 px-2">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2.5 rounded-full bg-gray-100 overflow-hidden min-w-[60px]">
+                                <div
+                                  className={`bar-fill h-full rounded-full ${
+                                    youLead
+                                      ? 'bg-gradient-to-r from-amber-400 to-yellow-500'
+                                      : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                                  }`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span
+                                className={`text-xs whitespace-nowrap tabular-nums ${
+                                  youLead
+                                    ? 'text-amber-600 font-semibold'
+                                    : 'text-gray-500'
+                                }`}
+                              >
+                                {youLead ? 'Top 👑' : `−${gap.toFixed(1)}`}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* streak */}
+                          <td className="py-3 px-2 pr-5 text-right whitespace-nowrap">
+                            <span className="font-semibold text-gray-900">
+                              🔥 {row.yourCurrentStreak}
+                            </span>
+                            <span className="text-gray-400 text-xs ml-2">
+                              best {row.yourBestStreak}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
+
+          <p className="mt-4 text-xs text-gray-500">
+            Scores are correct answers per minute (c/min), measured against all platform users. The standing
+            bar fills as you approach the platform top; the figure is how many c/min you are off it. Streaks
+            are counted by calendar day in Europe/London &mdash; multiple attempts in a day count as one day. 
+          </p>
         </div>
       </div>
     </div>
