@@ -201,51 +201,6 @@ const loadPurchasedQuizzes = async () => {
     )
   }
 
-
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-        <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50 sticky top-0 z-40">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
-            <Image
-              src="/images/logo-header.png"
-              alt="Optibl Learning Analytics"
-              width={320}
-              height={80}
-              className="h-10 w-auto sm:h-14 md:h-16 lg:h-20 max-w-none"
-            />
-          </div>
-        </header>
-
-        <div className="min-h-[70vh] flex items-center justify-center px-4">
-          <div className="max-w-md bg-white rounded-2xl shadow-xl p-8 text-center border border-gray-200">
-            <h1 className="text-2xl font-bold text-gray-900 mb-3">
-              Study Login Required
-            </h1>
-
-            <p className="text-gray-600 mb-6">
-              Please log in using the participant credentials provided by the research team.
-            </p>
-
-            <button
-              onClick={() => handleAuthModalOpen('login')}
-              className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg"
-            >
-              Login
-            </button>
-          </div>
-        </div>
-
-        <AuthModal
-          isOpen={authModalOpen}
-          onClose={() => setAuthModalOpen(false)}
-          mode={authMode}
-          onSwitchMode={(newMode: 'login' | 'register' | 'reset') => setAuthMode(newMode)}
-        />
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Modern Header */}
