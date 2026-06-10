@@ -20,6 +20,8 @@ interface QuizAttempt {
   quizzes: {
     title: string;
     description: string;
+    quiz_mode?: 'mcq' | 'banked' | null;
+    response_mode?: 'options' | 'typed' | null;
   } | null;
 }
 
@@ -73,6 +75,30 @@ const londonDayNumber = (t: number): number => {
   return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
 };
 
+// A celeration drawn over a sub-week window is unstable: the slope is divided by
+// a near-zero time base and can explode (e.g. ×80/wk from two adjacent days).
+// Require at least this many calendar days between first and last point before
+// any celeration figure, picture label, or slope-driven advice is shown.
+const MIN_CELERATION_DAYS = 7;
+
+// Per-type correct-rate fluency aims (count/min). These MUST match the values
+// used on the category page so a quiz's "green" target there agrees with the
+// aim line and advice here. (Error aim stays a flat ≤1/min — the category page
+// doesn't define a per-type error aim.)
+const FLUENCY_AIMS = { mcq: 8, bankedOptions: 15, bankedTyped: 8 } as const;
+
+const resolveAim = (
+  quizMode?: string | null,
+  responseMode?: string | null,
+): number => {
+  if (quizMode === 'banked') {
+    return responseMode === 'typed'
+      ? FLUENCY_AIMS.bankedTyped
+      : FLUENCY_AIMS.bankedOptions;
+  }
+  return FLUENCY_AIMS.mcq; // 'mcq' or unknown falls through to the MCQ aim
+};
+
 export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,7 +134,7 @@ export default function ProgressPage() {
           fluency_rate,
           total_time_minutes,
           completed_at,
-          quizzes!inner(title, description)
+          quizzes!inner(title, description, quiz_mode, response_mode)
         `)
         .eq('user_id', user.id)
         .order('completed_at', { ascending: false });
@@ -171,6 +197,13 @@ export default function ProgressPage() {
     selectedQuiz === 'all'
       ? attempts
       : attempts.filter((attempt) => attempt.quiz_id === selectedQuiz);
+
+  // The fluency chart only renders for a single selected quiz, so every filtered
+  // attempt shares one type → one aim. Resolve it from the first attempt.
+  const chartAim = resolveAim(
+    filteredAttempts[0]?.quizzes?.quiz_mode,
+    filteredAttempts[0]?.quizzes?.response_mode,
+  );
 
   useEffect(() => {
   if (!loading && selectedQuiz !== 'all' && filteredAttempts.length > 1) {
@@ -296,6 +329,8 @@ const computeCorrectCeleration = ():
   if (data.length < 2) return null;
 
   const firstDayNum = londonDayNumber(data[0].t);
+  const spanDays = londonDayNumber(data[data.length - 1].t) - firstDayNum;
+  if (spanDays < MIN_CELERATION_DAYS) return null; // not enough time base yet
 
   // x = calendar weeks since first point; y = log10(corrects per min)
   const x = data.map(d => (londonDayNumber(d.t) - firstDayNum) / 7);
@@ -836,6 +871,9 @@ const calculateCeleration = (
   if (data.length < 2) return null;
 
   const firstDayNumLocal = londonDayNumber(data[0].t);
+  const spanDays = londonDayNumber(data[data.length - 1].t) - firstDayNumLocal;
+  if (spanDays < MIN_CELERATION_DAYS) return null; // unstable below a week of data
+
   const xWeeks = data.map(d => (londonDayNumber(d.t) - firstDayNumLocal) / 7);
   const yVals  = data.map(d => Math.log10(Math.max(0.1, useErrors ? d.errorRate : d.fluency)));
 
@@ -968,21 +1006,21 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
 
                                     <line
                                       x1={startX}
-                                      y1={toLogY(20)}
+                                      y1={toLogY(chartAim)}
                                       x2={startX + chartWidth}
-                                      y2={toLogY(20)}
+                                      y2={toLogY(chartAim)}
                                       stroke="#10B981"
                                       strokeWidth="1"
                                       strokeDasharray="10,5"
                                     />
                                     <text
                                       x={startX + chartWidth - 140}
-                                      y={toLogY(20) - 8}
+                                      y={toLogY(chartAim) - 8}
                                       fontSize="13"
                                       fill="#059669"
                                       fontWeight={600}
                                     >
-                                      Correct aim: 20/min
+                                      Correct aim: {chartAim}/min
                                     </text>
                                     <line
                                     x1={startX}
@@ -1159,6 +1197,8 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
                                     </text>
 
                                   <g transform={`translate(${startX + chartWidth - 255}, ${startY +320})`}>
+  {(correctCelAfter || correctCelBefore || errorCelAfter || errorCelBefore) ? (
+    <>
   <rect x="0" y="0" width="250" height={hasStart ? 90 : 70} fill="white" stroke="#E5E7EB" strokeWidth="1" rx="8"/>
   {hasStart ? (
     <>
@@ -1195,6 +1235,18 @@ const errorCelAfter    = postData.length > 1 ? calculateCeleration(postData, tru
           Overall error celeration ×{Math.pow(10, errorCelAfter.slope).toFixed(2)}/wk
         </text>
       )}
+    </>
+  )}
+    </>
+  ) : (
+    <>
+      <rect x="0" y="0" width="250" height="48" fill="white" stroke="#E5E7EB" strokeWidth="1" rx="8"/>
+      <text x="10" y="20" fontSize="12" fill="#6B7280" fontWeight="500">
+        Celeration needs ≥{MIN_CELERATION_DAYS} days
+      </text>
+      <text x="10" y="38" fontSize="11" fill="#9CA3AF">
+        Keep logging daily timings
+      </text>
     </>
   )}
 </g>
@@ -1235,12 +1287,20 @@ const hasStart = Number.isFinite(startT);
 const preData  = hasStart ? chartData.filter(d => d.t <  startT) : [];
 const postData = hasStart ? chartData.filter(d => d.t >= startT) : chartData;
 
-// ⛔ Guard: need at least 3 points to give advice
+// Guard: need >=3 points AND a real time base (>=7 calendar days) before any
+// trend-based advice. Below a week, the celeration is unstable and the picture
+// label/tips are artefacts, so show an early-data note instead.
 const MIN_ADVICE_POINTS = 3;
-if (postData.length < MIN_ADVICE_POINTS) {
+const postSpanDays =
+  postData.length > 1
+    ? londonDayNumber(postData[postData.length - 1].t) - londonDayNumber(postData[0].t)
+    : 0;
+
+if (postData.length < MIN_ADVICE_POINTS || postSpanDays < MIN_CELERATION_DAYS) {
   return (
-    <div className="mt-4 p-4 bg-white border border-gray-200 rounded text-gray-700">
-      Insufficient data to provide data information about celeration trends
+    <div className="mt-4 p-4 bg-white border border-gray-200 rounded-lg text-gray-700">
+      Not enough data yet to read a trend — a reliable celeration needs at least {MIN_CELERATION_DAYS} days
+      of timings. Keep logging daily and trend-based guidance will appear here.
     </div>
   );
 }
@@ -1252,7 +1312,7 @@ const { picture, tips } = getPTAdviceForApp({
   chartData: postData,              // ← advice from the selected date onwards
   correctCeleration,
   errorCeleration,
-  aim: 20,
+  aim: chartAim,
   aimError: 1,
 });
 
@@ -1590,7 +1650,7 @@ const trend =
                                   <div className="flex items-center gap-2">
                                     <div className="w-8 h-0.5 bg-gradient-to-r from-green-500 to-green-400"></div>
                                     <span className="text-gray-700">
-                                      Aim line (20/min)
+                                      Aim line ({chartAim}/min)
                                     </span>
                                   </div>
                                 </div>
