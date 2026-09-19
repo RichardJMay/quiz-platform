@@ -5,11 +5,8 @@ import { supabase, supabasePublic } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '../contexts/AuthContext'
-import Image from 'next/image'
 import { ArrowRight } from 'lucide-react'
 import { executeAuthQuery } from '@/lib/supabase-utils'
-
-
 
 interface Category {
   id: string
@@ -40,77 +37,59 @@ export default function LandingPage() {
   const router = useRouter()
   const { user, signOut, loading: authLoading } = useAuth()
 
-  const firstRun = useRef(false);
-  const fetchedOnce = useRef(false)
-  const loadPurchasedQuizzesRef = useRef(false); // ADD THIS LINE
+  const firstRun = useRef(false)
+  const loadPurchasedQuizzesRef = useRef(false)
 
-// In your landing page component, modify the useEffect that loads data:
-useEffect(() => {
-  // Only run if we're actually on the home page route
-  if (window.location.pathname !== '/') {
-    console.log('Not on home page, skipping data load')
-    return
-  }
-  
-  console.log('Home page loaded, clearing payment state');
-  
-  try {
-    localStorage.removeItem('stripe_payment_intent');
-    sessionStorage.removeItem('stripe_payment_intent');
-  } catch (error) {
-    console.log('Storage cleanup failed:', error);
-  }
+  useEffect(() => {
+    if (window.location.pathname !== '/') return
 
-  if (!firstRun.current) {
-    firstRun.current = true;
-    loadCategories();
-  }
-  
-  if (user) {
-    loadPurchasedQuizzes();
-  }
-}, [user?.id]);
+    try {
+      localStorage.removeItem('stripe_payment_intent')
+      sessionStorage.removeItem('stripe_payment_intent')
+    } catch (error) {
+      console.log('Storage cleanup failed:', error)
+    }
+
+    if (!firstRun.current) {
+      firstRun.current = true
+      void loadCategories()
+    }
+
+    if (user) void loadPurchasedQuizzes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
 
   const loadCategories = async () => {
-  const ac = new AbortController();
-  const timeout = setTimeout(() => ac.abort('timeout'), 8000);
+    const ac = new AbortController()
+    const timeout = setTimeout(() => ac.abort('timeout'), 8000)
 
-  try {
-    const { data, error } = await supabasePublic
-      .from('quiz_categories')
-      .select(`
-        *,
-        quizzes(count)
-      `)
-      .eq('is_active', true)
-      .eq('quizzes.is_listed', true) 
-      .order('display_order')
-      .abortSignal(ac.signal);
+    try {
+      const { data, error } = await supabasePublic
+        .from('quiz_categories')
+        .select(`
+          *,
+          quizzes(count)
+        `)
+        .eq('is_active', true)
+        .eq('quizzes.is_listed', true)
+        .order('display_order')
+        .abortSignal(ac.signal)
 
-    if (error) throw error;
-    setCategories(data ?? []);
-  } catch (e) {
-    setCategories([]);
-    console.error('Categories fetch failed:', e);
-  } finally {
-    clearTimeout(timeout);
-    setLoading(false);
-  }
-};
-
-
-
-  // In your landing page loadPurchasedQuizzes
-const loadPurchasedQuizzes = async () => {
-    if (!user || loadPurchasedQuizzesRef.current) {
-      if (loadPurchasedQuizzesRef.current) {
-        console.log('=== loadPurchasedQuizzes ALREADY RUNNING - SKIPPING ===');
-      }
-      return;
+      if (error) throw error
+      setCategories(data ?? [])
+    } catch (error) {
+      setCategories([])
+      console.error('Categories fetch failed:', error)
+    } finally {
+      clearTimeout(timeout)
+      setLoading(false)
     }
-    
-    loadPurchasedQuizzesRef.current = true;
-    console.log('=== loadPurchasedQuizzes START ===');
+  }
+
+  const loadPurchasedQuizzes = async () => {
+    if (!user || loadPurchasedQuizzesRef.current) return
+
+    loadPurchasedQuizzesRef.current = true
 
     try {
       const result = await executeAuthQuery(async () => {
@@ -122,25 +101,22 @@ const loadPurchasedQuizzes = async () => {
           .order('purchased_at', { ascending: false })
       }, { maxRetries: 3, retryDelay: 1000 })
 
-      console.log('Purchases response:', result);
-
       if (result.error) {
         console.error('Error loading purchased quizzes:', result.error)
         setPurchasedQuizzes([])
       } else {
         const typedData = (result.data || []).map((item: any) => ({
-        quiz_id: item.quiz_id,
-        purchased_at: item.purchased_at,
-        quizzes: item.quizzes // Keep the fetched quiz details
+          quiz_id: item.quiz_id,
+          purchased_at: item.purchased_at,
+          quizzes: item.quizzes,
         }))
         setPurchasedQuizzes(typedData)
       }
-    } catch (err) {
-      console.error('Purchases fetch failed after retries:', err);
+    } catch (error) {
+      console.error('Purchases fetch failed after retries:', error)
       setPurchasedQuizzes([])
     } finally {
-      loadPurchasedQuizzesRef.current = false;
-      console.log('=== loadPurchasedQuizzes END ===');
+      loadPurchasedQuizzesRef.current = false
     }
   }
 
@@ -159,416 +135,211 @@ const loadPurchasedQuizzes = async () => {
 
   const handleSignOut = async () => {
     try {
-      const { error } = await signOut()
+      await signOut()
       setShowMyQuizzes(false)
       setPurchasedQuizzes([])
-      
+
       try {
         localStorage.clear()
         sessionStorage.clear()
-        
-        document.cookie.split(";").forEach((c) => {
-          document.cookie = c
-            .replace(/^ +/, "")
-            .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+        document.cookie.split(';').forEach((cookie) => {
+          document.cookie = cookie
+            .replace(/^ +/, '')
+            .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`)
         })
       } catch (storageError) {
         console.log('Storage clear error:', storageError)
       }
-      
-      setTimeout(() => {
-        window.location.replace('/')
-      }, 200)
-      
+
+      setTimeout(() => window.location.replace('/'), 200)
     } catch (error) {
       console.error('Sign out error:', error)
       try {
         localStorage.clear()
         sessionStorage.clear()
-      } catch (e) {}
+      } catch {}
       window.location.replace('/')
     }
   }
 
   if (loading || authLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <div className="text-xl text-gray-700 animate-pulse">Loading your learning platform...</div>
-        </div>
+      <div className="bl-page bl-loading" role="status" aria-live="polite">
+        <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
+        <p className="bl-kicker">Loading practice environment</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Modern Header */}
-      <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
-          <div className="flex flex-col space-y-3 sm:flex-row sm:justify-between sm:items-center sm:space-y-0 min-w-0">
-            <div className="flex items-center space-x-3">
-              {/* New Professional Logo - Fixed Mobile Width */}
-              <div className="relative min-w-0 flex-shrink-0">
-                <Image
-                  src="/images/logo-header.png"
-                  alt="Optibl Learning Analytics"
-                  width={320}
-                  height={80}
-                  className="h-10 w-auto sm:h-14 md:h-16 lg:h-20 max-w-none"
-                />
-              </div>
-            </div>
-            
-            <div className="flex flex-col sm:items-end space-y-2">
-              {user ? (
-                <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
-                  <span className="text-gray-700 text-sm sm:text-base">
-                    Welcome, {user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'User'}
-                  </span>
-                  <div className="flex space-x-2 sm:space-x-3">
-                    <button
-                      onClick={() => setShowMyQuizzes(!showMyQuizzes)}
-                      className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 text-xs sm:text-sm whitespace-nowrap shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    >
-                      📚 My Quizzes ({purchasedQuizzes.length})
-                    </button>
-                    <button
-                      onClick={() => router.push('/progress')}
-                      className="bg-gradient-to-r from-purple-500 to-blue-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:from-purple-600 hover:to-blue-700 transition-all duration-200 text-xs sm:text-sm whitespace-nowrap shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    >
-                      📊 Progress
-                    </button>
-                    <button
-                      onClick={handleSignOut}
-                      className="bg-gradient-to-r from-gray-600 to-gray-700 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:from-gray-700 hover:to-gray-800 transition-all duration-200 text-xs sm:text-sm shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    >
-                      👋 Sign Out
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
-                  <button
-                    onClick={() => handleAuthModalOpen('login')}
-                    className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                  >
-                    Login
-                  </button>
-                  <button
-                    onClick={() => handleAuthModalOpen('register')}
-                    className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-2 rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                  >
-                    Get Started
-                  </button>
-                </div>
-              )}
-            </div>
+    <div className="bl-page">
+      <header className="bl-header">
+        <div className="bl-container bl-header-inner">
+          <button className="bl-wordmark" onClick={() => router.push('/')} aria-label="BehaviorLingo home">
+            <span className="bl-wordmark-mark" aria-hidden="true">BL</span>
+            <span>behavior<span>lingo</span></span>
+          </button>
+
+          <div className="bl-header-actions">
+            {user ? (
+              <>
+                <span className="bl-user-label">
+                  Signed in as <strong>{user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'learner'}</strong>
+                </span>
+                <button className="bl-button bl-button-quiet" onClick={() => setShowMyQuizzes(!showMyQuizzes)}>
+                  {showMyQuizzes ? 'Browse modules' : `My practice · ${purchasedQuizzes.length}`}
+                </button>
+                <button className="bl-button bl-button-quiet" onClick={() => router.push('/progress')}>Progress</button>
+                <button className="bl-text-button" onClick={handleSignOut}>Sign out</button>
+              </>
+            ) : (
+              <>
+                <button className="bl-text-button" onClick={() => handleAuthModalOpen('login')}>Log in</button>
+                <button className="bl-button bl-button-small" onClick={() => handleAuthModalOpen('register')}>Create account</button>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Hero Section */}
-      {!showMyQuizzes && (
-        <section className="relative overflow-hidden py-16 sm:py-24">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-purple-600/10"></div>
-          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex flex-col lg:flex-row items-center gap-12">
-              {/* Hero Text */}
-              <div className="flex-1 text-center lg:text-left animate-fade-in">
-                {/* Logo Above Main Message */}
-                <div className="mb-8 flex justify-center lg:justify-start">
-                  <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-gray-200/50">
-                    <Image
-                      src="/images/logo-header.png"
-                      alt="Optibl Learning Analytics"
-                      width={480}
-                      height={120}
-                      className="w-[220px] h-auto sm:w-[320px] md:w-[480px]"
-                      priority
-                      sizes="(max-width: 640px) 220px, (max-width: 768px) 320px, 480px"
-                    />
-                  </div>
-                </div>
-                
-                <h2 className="text-4xl sm:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-                  Personalised Pathways
-                  <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent block sm:inline">
-                    {' '}for Learning Mastery
-                  </span>
-                </h2>
-                <p className="text-xl sm:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto lg:mx-0 leading-relaxed">
-                  Master behaviour analytic concepts with optibl, a personalised learning platform designed to build fluency in core skills and conceptual understanding.
-                </p>
-                
-                {!user && (
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start items-center mb-12">
-                    <button
-                      onClick={() => handleAuthModalOpen('register')}
-                      className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl text-lg font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-300 shadow-xl hover:shadow-2xl transform hover:-translate-y-1"
-                    >
-                      🚀 Start Learning
-                    </button>
-                    <p className="text-gray-500"></p>
-                  </div>
-                )}
-              </div>
-              
-              {/* Hero Profile Section */}
-              <div className="flex-none lg:w-80">
-                <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-gray-200/50 text-center">
-                  <div className="relative mb-6">
-                    <Image
-                      src="/images/dr-may-profile.jpg"
-                      alt="Dr May - Learning Expert"
-                      width={150}
-                      height={150}
-                      className="rounded-full mx-auto border-4 border-gradient-to-r from-blue-600 to-purple-600 shadow-lg"
-                    />
-                    <div className="absolute -bottom-2 -right-2 bg-green-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold">
-                      ✓
-                    </div>
-                  </div>
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Dr Rich May</h3>
-                  <p className="text-blue-600 font-semibold mb-1">Dr Richard May PhD BCBA-D</p>
-                  <p className="text-gray-700 font-medium mb-3"></p>
-                  <p className="text-gray-700 font-medium mb-3">Associate Professor of Behaviour Analysis</p>
-                  <p className="text-gray-600 text-sm leading-relaxed mb-4">
-                    &ldquo;opitbl has been designed help you achieve real mastery of behaviour analytic concepts. The program applies learning science to help you achieve expertise in the science of learning!&rdquo;
-                  </p>
-                  <a
-                    href="https://richardjmay.github.io/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 text-sm font-medium shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                  >
-                    🌐 About Dr May
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-        {/* Features Section */}
+      <main>
         {!showMyQuizzes && (
-          <section className="mb-16">
-           <div className="text-center mb-12 mt-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-4">What is optibl?</h2>
-              <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                optibl is a personalised learning platform that has been specifically designed to optimse the learning of new conceptual knowledge. Master skills that stick.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-3 gap-8">
-              <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
-                <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4">
-                  <span className="text-white text-2xl">⚡</span>
+          <>
+            <section className="bl-hero">
+              <div className="bl-container bl-hero-grid">
+                <div className="bl-hero-copy">
+                  <p className="bl-kicker">Fluency training for behaviour analysis</p>
+                  <h1>Know the terms.<br /><span>Build the fluency.</span></h1>
+                  <p className="bl-hero-lede">
+                    Precision-designed practice for behaviour analysts who want knowledge that is accurate, rapid and ready when it matters.
+                  </p>
+                  <div className="bl-hero-actions">
+                    <button
+                      className="bl-button bl-button-primary"
+                      onClick={() => user ? document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' }) : handleAuthModalOpen('register')}
+                    >
+                      {user ? 'Choose a module' : 'Start building fluency'}
+                      <ArrowRight size={17} strokeWidth={2} />
+                    </button>
+                    {!user && <span className="bl-action-note">Account required to save progress</span>}
+                  </div>
+                  <div className="bl-proof-line" aria-label="Product features">
+                    <span>Accuracy</span><i aria-hidden="true" /><span>Fluency</span><i aria-hidden="true" /><span>Retention</span>
+                  </div>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Science of learning</h3>
-                <p className="text-gray-600">The modules are carefully sequenced to help you build accuracy, fluency and long-term retention</p>
-              </div>
-              
-              <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
-                <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl flex items-center justify-center mb-4">
-                  <span className="text-white text-2xl">📊</span>
+
+                <div className="bl-terminal-wrap" aria-label="Example BehaviorLingo practice display">
+                  <div className="bl-terminal-shadow" aria-hidden="true" />
+                  <div className="bl-terminal">
+                    <div className="bl-terminal-top"><span>FLUENCY_SESSION</span><span>01:00</span></div>
+                    <div className="bl-terminal-screen">
+                      <span className="bl-screen-label">TERM_014</span>
+                      <p>Reinforcement</p>
+                      <div className="bl-screen-rule" />
+                      <dl>
+                        <div><dt>Accuracy</dt><dd>96%</dd></div>
+                        <div><dt>Rate</dt><dd>14.2 / min</dd></div>
+                        <div><dt>Status</dt><dd className="bl-status-ready">Building</dd></div>
+                      </dl>
+                    </div>
+                    <div className="bl-terminal-foot"><span>Respond accurately</span><span>Then respond fluently</span></div>
+                  </div>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Progress Analytics</h3>
-                <p className="text-gray-600">Precision teaching analytics for optimised learning outcomes </p>
               </div>
-              
-              <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50">
-                <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl flex items-center justify-center mb-4">
-                  <span className="text-white text-2xl">🎯</span>
+            </section>
+
+            <section className="bl-method">
+              <div className="bl-container">
+                <div className="bl-section-heading">
+                  <div><p className="bl-kicker">A better practice loop</p><h2>Designed around how fluency develops.</h2></div>
+                  <p>Move beyond recognition. Build fast, accurate responding through focused, measurable practice.</p>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">Chart your Progress</h3>
-                <p className="text-gray-600">Interactive celeration charts for data-informed decision-making</p>
+                <div className="bl-method-grid">
+                  <article className="bl-method-card"><span className="bl-card-number">01</span><h3>Learn with support</h3><p>Begin with response options that make accurate discrimination possible from the first session.</p></article>
+                  <article className="bl-method-card"><span className="bl-card-number">02</span><h3>Retrieve independently</h3><p>Move to typed responding when the terms are familiar and active recall matters most.</p></article>
+                  <article className="bl-method-card"><span className="bl-card-number">03</span><h3>Track real fluency</h3><p>See accuracy and correct responses per minute—not a vague score that hides performance.</p></article>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          </>
         )}
 
-        {/* My Quizzes Section */}
         {user && showMyQuizzes && (
-          <div className="mb-12">
-            <div className="text-center mb-8">
-              <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">Your Learning Dashboard</h2>
-              <p className="text-xl text-gray-600">
-                Continue your optibl journey
-              </p>
-            </div>
-            
+          <section className="bl-dashboard bl-container">
+            <div className="bl-page-heading"><p className="bl-kicker">Saved access</p><h1>Your practice</h1><p>Continue where you left off.</p></div>
             {purchasedQuizzes.length === 0 ? (
-              <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
-                <div className="text-6xl mb-4">🎓</div>
-                <h3 className="text-2xl font-semibold text-gray-700 mb-2">Ready to Start Learning with optibl?</h3>
-                <p className="text-gray-600 mb-6"></p>
-                <button
-                  onClick={() => setShowMyQuizzes(false)}
-                  className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                >
-                  Browse optibl Categories
-                </button>
+              <div className="bl-empty-state">
+                <span className="bl-empty-code">NO_SAVED_SETS</span><h2>Your practice list is empty.</h2><p>Browse the modules and choose a fluency set to begin.</p>
+                <button className="bl-button bl-button-primary" onClick={() => setShowMyQuizzes(false)}>Browse modules <ArrowRight size={17} /></button>
               </div>
             ) : (
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              <div className="bl-practice-grid">
                 {purchasedQuizzes.map((purchase) => (
-                  <div key={purchase.quiz_id} className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 border border-gray-200/50 border-l-4 border-l-green-500">
-                    <div className="p-8">
-                      <div className="flex items-center mb-3">
-                        <span className="text-green-500 text-2xl mr-3">✅</span>
-                        <h3 className="text-xl font-bold text-gray-900">{purchase.quizzes?.title}</h3>
-                      </div>
-                      <p className="text-gray-600 mb-4">{purchase.quizzes?.description}</p>
-                      <p className="text-sm text-gray-500 mb-6">
-                        Purchased: {new Date(purchase.purchased_at).toLocaleDateString()}
-                      </p>
-                      
-                      <button
-                        onClick={() => startPurchasedQuiz(purchase.quiz_id)}
-                        className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                      >
-                        🚀 Continue Learning
-                      </button>
-                    </div>
-                  </div>
+                  <article key={purchase.quiz_id} className="bl-practice-card">
+                    <span className="bl-card-number">READY</span><h2>{purchase.quizzes?.title}</h2><p>{purchase.quizzes?.description}</p>
+                    <span className="bl-card-meta">Added {new Date(purchase.purchased_at).toLocaleDateString()}</span>
+                    <button className="bl-button bl-button-primary" onClick={() => startPurchasedQuiz(purchase.quiz_id)}>Continue practice <ArrowRight size={17} /></button>
+                  </article>
                 ))}
               </div>
             )}
-            
-            <div className="text-center mt-8">
-              <button
-                onClick={() => setShowMyQuizzes(false)}
-                className="text-blue-600 hover:text-blue-800 underline font-medium"
-              >
-                Browse More optibl Categories
-              </button>
-            </div>
-          </div>
+          </section>
         )}
 
-        {/* Categories Section */}
         {!showMyQuizzes && (
-          <>
-            <section>
-              <div className="text-center mb-12">
-                <h2 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">optibl Modules</h2>
-                <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                  Behaviour Analysis Learning Modules
-                </p>
-                {!user && (
-                  <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200">
-                    <p className="text-blue-700 font-medium">
-                      💡 Create an account to track your progress
-                    </p>
-                  </div>
-                )}
+          <section id="modules" className="bl-modules">
+            <div className="bl-container">
+              <div className="bl-section-heading bl-section-heading-modules">
+                <div><p className="bl-kicker">BACB 6th Edition</p><h2>Choose your module.</h2></div>
+                <p>Practice by content area in supported options mode or independent typed mode.</p>
               </div>
-              
+
+              {!user && <div className="bl-notice"><span className="bl-notice-mark" aria-hidden="true">i</span><span>Create an account to record attempts and chart your progress over time.</span></div>}
+
               {categories.length === 0 ? (
-                <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
-                  <div className="text-6xl mb-4">📚</div>
-                  <h3 className="text-2xl font-semibold text-gray-700 mb-2">New optibl Categories Coming Soon!</h3>
-                  <p className="text-gray-600">We&apos;re preparing amazing content for you. Check back soon!</p>
-                </div>
+                <div className="bl-empty-state"><span className="bl-empty-code">CONTENT_LOADING</span><h2>New modules are in preparation.</h2><p>More behaviour-analytic fluency content is coming soon.</p></div>
               ) : (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {categories.map((category) => {
+                <div className="bl-module-grid">
+                  {categories.map((category, index) => {
                     const quizCount = category.quizzes?.[0]?.count || 0
-                    
                     return (
-                      <div
-                        key={category.id}
-                        onClick={() => handleCategoryClick(category.id, category.name)}
-                        className="group bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-200/50 hover:border-gray-300 transform hover:-translate-y-2"
-                      >
-                        <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4 transition-all duration-300">
-                          <span className="text-white text-2xl">📚</span>
-                        </div>
-                        
-                        <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-gray-700 transition-colors">
-                          {category.name}
-                        </h3>
-                        
-                        <p className="text-gray-600 mb-6 text-sm leading-relaxed">
-                          {category.description}
-                        </p>
-                        
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-gray-500">
-                            {quizCount} {quizCount === 1 ? 'Quiz' : 'Quizzes'}
-                          </span>
-                          <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all duration-300" />
-                        </div>
-                      </div>
+                      <button key={category.id} onClick={() => handleCategoryClick(category.id, category.name)} className="bl-module-card">
+                        <span className="bl-module-index">AREA_{String(index + 1).padStart(2, '0')}</span>
+                        <h3>{category.name}</h3><p>{category.description}</p>
+                        <span className="bl-module-bottom"><span>{quizCount} {quizCount === 1 ? 'practice set' : 'practice sets'}</span><ArrowRight size={19} strokeWidth={2} /></span>
+                      </button>
                     )
                   })}
                 </div>
               )}
-            </section>
-          </>
-        )}
-      </div>
-
-      {/* Auth Modal */}
-      <AuthModal
-        isOpen={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
-        mode={authMode}
-        onSwitchMode={(newMode: 'login' | 'register' | 'reset') => setAuthMode(newMode)}
-      />
-
-      {/* Footer */}
-      <footer className="bg-white/80 backdrop-blur-sm border-t border-gray-200/50 mt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
-            <div className="flex items-center space-x-3">
-              <Image
-                src="/images/icon.png"
-                alt="optibl icon"
-                width={24}
-                height={24}
-                className="w-6 h-6"
-              />
-              <span className="text-gray-600">© 2025 optibl</span>
             </div>
-            
-            <div className="flex space-x-6 text-sm">
-              <button
-                onClick={() => router.push('/about')}
-                className="text-gray-600 hover:text-blue-600 transition-colors cursor-pointer"
-              >
-                About optibl
-               </button>
-                <button
-                  onClick={() => router.push('/privacy')}
-                  className="text-gray-600 hover:text-blue-600 transition-colors cursor-pointer"
-                 >
-                    Privacy Policy
-                  </button>
-                  <button
-                    onClick={() => router.push('/terms')}
-                    className="text-gray-600 hover:text-blue-600 transition-colors cursor-pointer"
-                  >
-                   Terms of Service
-                  </button>
-                  <a 
-                    href="https://richardjmay.github.io/" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-gray-600 hover:text-blue-600 transition-colors"
-                   >
-                   About Dr May
-                 </a>
-                </div>
+          </section>
+        )}
+
+        {!showMyQuizzes && (
+          <section className="bl-credibility">
+            <div className="bl-container bl-credibility-inner">
+              <p className="bl-kicker">Built from behavioural science</p>
+              <h2>Serious practice. Clear feedback. No gimmicks.</h2>
+              <p>BehaviorLingo is created by Dr Richard May, BCBA-D and Associate Professor of Behaviour Analysis, to bring fluency-based learning into everyday professional study.</p>
+              <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer">About Dr May <ArrowRight size={16} /></a>
+            </div>
+          </section>
+        )}
+      </main>
+
+      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} mode={authMode} onSwitchMode={(newMode: 'login' | 'register' | 'reset') => setAuthMode(newMode)} />
+
+      <footer className="bl-footer">
+        <div className="bl-container bl-footer-inner">
+          <div><div className="bl-footer-wordmark">behavior<span>lingo</span></div><p>Fluency training for behaviour analysis.</p></div>
+          <div className="bl-footer-links">
+            <button onClick={() => router.push('/about')}>About</button><button onClick={() => router.push('/privacy')}>Privacy</button><button onClick={() => router.push('/terms')}>Terms</button>
+            <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer">Dr May</a>
           </div>
+          <span className="bl-copyright">© 2026 BehaviorLingo</span>
         </div>
       </footer>
-
-      {/* Floating Elements */}
-      <div className="fixed top-20 left-4 w-20 h-20 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full opacity-20 animate-pulse"></div>
-      <div className="fixed bottom-20 right-4 w-16 h-16 bg-gradient-to-r from-green-400 to-blue-400 rounded-full opacity-20 animate-pulse delay-1000"></div>
     </div>
   )
 }

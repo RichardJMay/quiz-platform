@@ -14,8 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Quiz Platform",
-  description: "Professional quiz platform with fluency tracking",
+  title: {
+    default: "BehaviorLingo | Fluency Training for Behaviour Analysis",
+    template: "%s | BehaviorLingo",
+  },
+  description:
+    "Precision-designed fluency practice for behaviour analysts. Build accurate, rapid recall and track meaningful progress.",
 };
 
 export default function RootLayout({
@@ -25,9 +29,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider>
           {children}
         </AuthProvider>
