@@ -762,6 +762,11 @@ a:focus-visible {
   padding: 36px 0 clamp(82px, 10vw, 132px);
 }
 
+.bl-mobile-nav,
+.bl-mobile-mode-switch {
+  display: none;
+}
+
 .bl-back-link {
   min-height: 42px;
   padding: 0;
@@ -1253,6 +1258,127 @@ a:focus-visible {
     text-align: left;
   }
 
+  .bl-category-header {
+    position: sticky;
+  }
+
+  .bl-category-header .bl-header-inner {
+    min-height: 58px;
+    padding: 10px 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .bl-category-header .bl-wordmark {
+    flex: 0 0 auto;
+    gap: 8px;
+    font-size: 0.88rem;
+  }
+
+  .bl-category-header .bl-wordmark-mark {
+    width: 31px;
+    height: 31px;
+    font-size: 0.62rem;
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.28);
+  }
+
+  .bl-category-header .bl-desktop-nav {
+    display: none;
+  }
+
+  .bl-category-header .bl-mobile-nav {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .bl-mobile-nav > button {
+    min-height: 36px;
+    padding: 0 6px;
+    color: rgba(251, 252, 245, 0.82);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 0.64rem;
+    font-weight: 650;
+  }
+
+  .bl-mobile-nav > button:hover {
+    color: var(--bl-accent);
+  }
+
+  .bl-mobile-nav > .bl-mobile-join {
+    padding-inline: 9px;
+    color: var(--bl-forest-deep);
+    background: var(--bl-accent);
+    border: 1px solid var(--bl-accent);
+  }
+
+  .bl-account-menu {
+    position: relative;
+  }
+
+  .bl-account-menu summary {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    color: var(--bl-forest-deep);
+    background: var(--bl-accent);
+    border: 1px solid var(--bl-accent);
+    cursor: pointer;
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 0.7rem;
+    font-weight: 800;
+    list-style: none;
+  }
+
+  .bl-account-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .bl-account-menu > div {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 60;
+    width: 210px;
+    padding: 15px;
+    color: var(--bl-ink);
+    background: var(--bl-white);
+    border: 1px solid var(--bl-ink);
+    box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.24);
+  }
+
+  .bl-account-menu > div span {
+    display: block;
+    color: var(--bl-ink-soft);
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 0.68rem;
+    line-height: 1.5;
+  }
+
+  .bl-account-menu > div strong {
+    color: var(--bl-ink);
+  }
+
+  .bl-account-menu > div button {
+    width: 100%;
+    min-height: 40px;
+    margin-top: 13px;
+    color: var(--bl-white);
+    background: var(--bl-forest);
+    border: 1px solid var(--bl-ink);
+    cursor: pointer;
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 0.68rem;
+    font-weight: 700;
+  }
+
   .bl-category-main {
     padding-top: 22px;
   }
@@ -1277,6 +1403,56 @@ a:focus-visible {
   .bl-mastery-key > span:first-child {
     width: 100%;
     margin-right: 0;
+  }
+
+  .bl-mobile-mode-switch {
+    position: sticky;
+    top: 58px;
+    z-index: 30;
+    margin: 0 0 14px;
+    padding: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    background: rgba(244, 245, 233, 0.96);
+    border: 1px solid var(--bl-ink);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 6px 14px rgba(21, 34, 25, 0.1);
+  }
+
+  .bl-mobile-mode-switch button {
+    min-height: 44px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    color: var(--bl-ink-soft);
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 0.72rem;
+    font-weight: 750;
+  }
+
+  .bl-mobile-mode-switch button[aria-selected="true"] {
+    color: var(--bl-lcd-light);
+    background: var(--bl-forest-deep);
+    border-color: var(--bl-forest-deep);
+  }
+
+  .bl-mobile-mode-switch button span {
+    min-width: 21px;
+    height: 21px;
+    display: grid;
+    place-items: center;
+    color: var(--bl-forest-deep);
+    background: var(--bl-lcd);
+    font-size: 0.6rem;
+  }
+
+  .bl-mobile-inactive {
+    display: none;
   }
 
   .bl-practice-column-head {

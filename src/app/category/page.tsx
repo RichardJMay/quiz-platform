@@ -56,6 +56,7 @@ function CategoryPageContent() {
   const [loading, setLoading] = useState(true)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login')
+  const [mobileMode, setMobileMode] = useState<'options' | 'typed'>('options')
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -246,17 +247,23 @@ function CategoryPageContent() {
   }
 
   const PracticeColumn = ({
+    mode,
     code,
     title,
     description,
     items,
   }: {
+    mode: 'options' | 'typed'
     code: string
     title: string
     description: string
     items: Quiz[]
   }) => (
-    <section className="bl-practice-column">
+    <section
+      id={`practice-${mode}`}
+      className={`bl-practice-column ${mobileMode === mode ? 'bl-mobile-active' : 'bl-mobile-inactive'}`}
+      aria-labelledby={`tab-${mode}`}
+    >
       <div className="bl-practice-column-head">
         <div>
           <span>{code}</span>
@@ -273,6 +280,9 @@ function CategoryPageContent() {
     </section>
   )
 
+  const displayName = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Learner'
+  const accountInitial = displayName.charAt(0).toUpperCase()
+
   if (loading || authLoading) {
     return (
       <div className="bl-page bl-loading" role="status" aria-live="polite">
@@ -284,14 +294,14 @@ function CategoryPageContent() {
 
   return (
     <div className="bl-page">
-      <header className="bl-header">
+      <header className="bl-header bl-category-header">
         <div className="bl-container bl-header-inner">
           <button className="bl-wordmark" onClick={() => router.push('/')} aria-label="BehaviorLingo home">
             <span className="bl-wordmark-mark" aria-hidden="true">BL</span>
             <span>behavior<span>lingo</span></span>
           </button>
 
-          <div className="bl-header-actions">
+          <div className="bl-header-actions bl-desktop-nav">
             {user ? (
               <>
                 <span className="bl-user-label">Signed in as <strong>{user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'learner'}</strong></span>
@@ -306,6 +316,27 @@ function CategoryPageContent() {
               </>
             )}
           </div>
+
+          <nav className="bl-mobile-nav" aria-label="Mobile navigation">
+            {user ? (
+              <>
+                <button onClick={() => router.push('/')}>Modules</button>
+                <button onClick={() => router.push('/progress')}>Progress</button>
+                <details className="bl-account-menu">
+                  <summary aria-label={`Account menu for ${displayName}`}>{accountInitial}</summary>
+                  <div>
+                    <span>Signed in as <strong>{displayName}</strong></span>
+                    <button onClick={handleSignOut}>Sign out</button>
+                  </div>
+                </details>
+              </>
+            ) : (
+              <>
+                <button onClick={() => handleAuthModalOpen('login')}>Log in</button>
+                <button className="bl-mobile-join" onClick={() => handleAuthModalOpen('register')}>Join</button>
+              </>
+            )}
+          </nav>
         </div>
       </header>
 
@@ -341,20 +372,44 @@ function CategoryPageContent() {
               <button className="bl-button bl-button-primary" onClick={() => router.push('/')}>Explore other modules</button>
             </div>
           ) : (
-            <div className="bl-practice-columns">
-              <PracticeColumn
-                code="MODE_01"
-                title="Options practice"
-                description="Build accurate discrimination with response support."
-                items={bankedOptions}
-              />
-              <PracticeColumn
-                code="MODE_02"
-                title="Typed practice"
-                description="Strengthen independent retrieval without response prompts."
-                items={bankedTyped}
-              />
-            </div>
+            <>
+              <div className="bl-mobile-mode-switch" role="tablist" aria-label="Practice mode">
+                <button
+                  id="tab-options"
+                  role="tab"
+                  aria-selected={mobileMode === 'options'}
+                  aria-controls="practice-options"
+                  onClick={() => setMobileMode('options')}
+                >
+                  Options <span>{bankedOptions.length}</span>
+                </button>
+                <button
+                  id="tab-typed"
+                  role="tab"
+                  aria-selected={mobileMode === 'typed'}
+                  aria-controls="practice-typed"
+                  onClick={() => setMobileMode('typed')}
+                >
+                  Typed <span>{bankedTyped.length}</span>
+                </button>
+              </div>
+              <div className="bl-practice-columns">
+                <PracticeColumn
+                  mode="options"
+                  code="MODE_01"
+                  title="Options practice"
+                  description="Build accurate discrimination with response support."
+                  items={bankedOptions}
+                />
+                <PracticeColumn
+                  mode="typed"
+                  code="MODE_02"
+                  title="Typed practice"
+                  description="Strengthen independent retrieval without response prompts."
+                  items={bankedTyped}
+                />
+              </div>
+            </>
           )}
         </div>
       </main>
