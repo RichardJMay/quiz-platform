@@ -329,8 +329,9 @@ export default function QuizTakerBankedTyped() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-xl">Loading quiz...</div>
+      <div className="bl-page bl-loading min-h-screen">
+        <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
+        <p className="bl-kicker">Loading term bank</p>
       </div>
     )
   }
@@ -342,85 +343,46 @@ export default function QuizTakerBankedTyped() {
     const correctResponsesPerMinute = totalQuizTimeMinutes > 0 ? score / totalQuizTimeMinutes : 0
 
     const isAbove = correctResponsesPerMinute >= threshold
-    const rateScore = Math.max(0, correctResponsesPerMinute - threshold)
-    const maxBarWidth = 100
-    const barPct = Math.min(100, (rateScore / maxBarWidth) * 100)
+    const completionRateWidth = Math.min(100, (correctResponsesPerMinute / maxBarRate) * 100)
 
     return (
-      <div className="min-h-screen bg-gray-100 py-8">
-        <div className="max-w-4xl mx-auto p-4 sm:p-6">
-          <div className="bg-white rounded-lg shadow-lg text-center p-6 sm:p-8">
-            <h2 className="text-2xl sm:text-3xl font-bold mb-6 text-gray-900">Quiz Completed! 🎉</h2>
-
-            <div className="grid md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-blue-50 rounded-lg p-4 sm:p-6">
-                <div className="text-4xl sm:text-6xl font-bold mb-2 text-blue-600">{percentage}%</div>
-                <div className="text-sm sm:text-base text-gray-700">Accuracy</div>
-                <div className="text-xs sm:text-sm text-gray-600 mt-1">
-                  {score} out of {questions.length} correct
-                </div>
-              </div>
-
-              <div className={`${isAbove ? 'bg-green-50' : 'bg-red-50'} rounded-lg p-4 sm:p-6`}>
-                <div className={`text-2xl sm:text-4xl font-bold mb-2 ${isAbove ? 'text-green-600' : 'text-red-600'}`}>
-                  {correctResponsesPerMinute.toFixed(1)}
-                </div>
-                <div className="text-sm sm:text-base text-gray-700">Correct/min</div>
-                <div className="text-xs sm:text-sm text-gray-600 mt-1">Target: {threshold}/min</div>
-              </div>
-
-              <div className="bg-purple-50 rounded-lg p-4 sm:p-6">
-                <div className="text-2xl sm:text-4xl font-bold mb-2 text-purple-600">
-                  {totalQuizTimeMinutes.toFixed(1)}
-                </div>
-                <div className="text-sm sm:text-base text-gray-700">Minutes</div>
-                <div className="text-xs sm:text-sm text-gray-600 mt-1">Total time</div>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 rounded-lg p-4 sm:p-6 mb-6">
-              <h3 className="text-lg sm:text-xl font-semibold mb-3 text-gray-900">Performance Analysis</h3>
-
-              <div className="relative w-full h-6 sm:h-8 bg-gray-200 rounded-lg overflow-hidden mb-3">
-                <div className="absolute left-0 top-0 w-px h-full bg-gray-400 z-10"></div>
-
-                {isAbove ? (
-                  <div className="h-full bg-green-500 transition-all duration-1000 ease-out" style={{ width: `${barPct}%` }} />
-                ) : (
-                  <div className="h-full bg-red-500 opacity-50" />
-                )}
-
-                <div className="absolute inset-0 flex items-center justify-center text-white font-semibold text-xs sm:text-sm">
-                  {isAbove ? `+${rateScore.toFixed(1)} above target!` : `${(threshold - correctResponsesPerMinute).toFixed(1)} below target`}
-                </div>
-              </div>
-
-              <div className="text-xs sm:text-sm text-gray-600">
-                {isAbove
-                  ? "Excellent fluency! You're answering quickly and accurately."
-                  : "Focus on building speed while maintaining accuracy."}
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center">
-              <button
-                onClick={() => router.push('/')}
-                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
-              >
-                Return Home
-              </button>
-
-              {user && (
-                <button
-                  onClick={() => router.push('/progress')}
-                  className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium"
-                >
-                  View Progress History
-                </button>
-              )}
-            </div>
+      <div className="bl-page bl-session-page">
+        <header className="bl-session-topbar">
+          <div className="bl-session-shell bl-session-topbar-inner">
+            <button className="bl-session-wordmark" onClick={() => router.push('/')} aria-label="BehaviorLingo home">behavior<span>lingo</span></button>
+            <span className="bl-session-mode">Typed sprint</span>
           </div>
-        </div>
+        </header>
+        <main className="bl-session-shell bl-complete-wrap">
+          <section className="bl-complete-panel">
+            <p className="bl-kicker">Session complete</p>
+            <h1>Timing logged.</h1>
+            <p className="bl-complete-lede">Your latest run has been added to your performance record.</p>
+
+            <div className="bl-result-grid">
+              <div className="bl-result-cell"><span>Accuracy</span><strong>{percentage}%</strong><small>{score}/{questions.length} correct</small></div>
+              <div className={`bl-result-cell ${isAbove ? 'bl-result-on-aim' : 'bl-result-building'}`}><span>Fluency</span><strong>{correctResponsesPerMinute.toFixed(1)}</strong><small>correct/min · aim {threshold}</small></div>
+              <div className="bl-result-cell"><span>Duration</span><strong>{totalQuizTimeMinutes.toFixed(1)}</strong><small>minutes</small></div>
+            </div>
+
+            <div className="bl-analysis-panel">
+              <div className="bl-analysis-heading">
+                <div><span>Fluency aim</span><strong>{isAbove ? 'Aim reached' : 'Building toward aim'}</strong></div>
+                <b>{correctResponsesPerMinute.toFixed(1)} / {threshold}</b>
+              </div>
+              <div className="bl-rate-track" aria-label={`Fluency rate ${correctResponsesPerMinute.toFixed(1)} correct per minute`}>
+                <div className={isAbove ? 'is-on-aim' : ''} style={{ width: `${completionRateWidth}%` }} />
+                <i style={{ left: `${(threshold / maxBarRate) * 100}%` }} />
+              </div>
+              <p>{isAbove ? 'You reached the current fluency aim. Repeat the pack to strengthen retention.' : 'Prioritise accurate recall; speed should increase as retrieval becomes more fluent.'}</p>
+            </div>
+
+            <div className="bl-session-actions">
+              <button onClick={() => router.push('/')} className="bl-button bl-button-secondary">Return home</button>
+              {user && <button onClick={() => router.push('/progress')} className="bl-button">View progress</button>}
+            </div>
+          </section>
+        </main>
       </div>
     )
   }
@@ -429,111 +391,91 @@ export default function QuizTakerBankedTyped() {
     const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student'
 
     return (
-      <div className="max-w-2xl mx-auto p-6">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-3xl font-bold text-center mb-2 text-gray-900">{selectedQuiz.title}</h1>
-          <p className="text-gray-600 text-center mb-8">{selectedQuiz.description}</p>
-
-          {user && <p className="text-center text-gray-700 mb-6">Ready to start, {displayName}?</p>}
-
-          <button
-            onClick={() => startQuiz(selectedQuiz)}
-            className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            Start Quiz
-          </button>
-        </div>
+      <div className="bl-page bl-session-page">
+        <header className="bl-session-topbar">
+          <div className="bl-session-shell bl-session-topbar-inner">
+            <button className="bl-session-wordmark" onClick={() => router.push('/')} aria-label="BehaviorLingo home">behavior<span>lingo</span></button>
+            <span className="bl-session-mode">Typed sprint</span>
+          </div>
+        </header>
+        <main className="bl-session-shell bl-start-wrap">
+          <section className="bl-start-panel">
+            <div className="bl-start-copy">
+              <p className="bl-kicker">Fluency timing · Typed</p>
+              <h1>{selectedQuiz.title}</h1>
+              <p>{selectedQuiz.description}</p>
+              {user && <div className="bl-ready-label">Ready, <strong>{displayName}</strong></div>}
+            </div>
+            <div className="bl-start-console">
+              <span>How this timing works</span>
+              <ol>
+                <li><b>01</b><p>Read the definition and type the matching term.</p></li>
+                <li><b>02</b><p>Use exact terminology; accepted aliases are recognised automatically.</p></li>
+                <li><b>03</b><p>Work accurately and build toward {threshold} correct responses per minute.</p></li>
+              </ol>
+              <button onClick={() => startQuiz(selectedQuiz)} className="bl-button bl-start-button">Start timing <span>→</span></button>
+            </div>
+          </section>
+        </main>
       </div>
     )
   }
 
   if (selectedQuiz && questions.length > 0 && currentQuestion) {
     const progress = ((currentQuestionIndex + 1) / questions.length) * 100
+    const typedIsCorrect = gradeTyped().isCorrect
 
     return (
-      <div className="min-h-screen bg-gray-100" onMouseMove={startIdleTimers} onKeyDown={startIdleTimers}>
-        <div className="bg-white shadow-sm border-b">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4">
-            <div className="flex-1">
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{selectedQuiz.title}</h1>
-              <p className="text-sm text-gray-600">Definition {currentQuestionIndex + 1} of {questions.length}</p>
-            </div>
-            <button
-              onClick={() => router.push('/')}
-              className="bg-gray-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm sm:text-base whitespace-nowrap"
-            >
-              Return Home
-            </button>
+      <div className="bl-page bl-session-page" onMouseMove={startIdleTimers} onKeyDown={startIdleTimers}>
+        <header className="bl-session-topbar">
+          <div className="bl-session-shell bl-session-topbar-inner">
+            <div className="bl-session-title"><span>Typed sprint</span><strong>{selectedQuiz.title}</strong></div>
+            <button onClick={() => router.push('/')} className="bl-session-exit">Exit timing</button>
           </div>
-        </div>
+        </header>
 
-        <div className="max-w-4xl mx-auto p-4 sm:p-6">
-          <div className="w-full">
+        <main className="bl-session-shell bl-workspace">
             {idleWarning && !quizCompleted && (
-              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-800">
-                You’ve been inactive for a while. The quiz will end soon unless you continue.
-                <button
-                  onClick={() => { startIdleTimers(); setIdleWarning(false) }}
-                  className="ml-2 inline-flex items-center rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-700"
-                >
-                  I’m back
-                </button>
+              <div className="bl-idle-warning">
+                <span>You’ve been inactive. This timing will end soon.</span>
+                <button onClick={() => { startIdleTimers(); setIdleWarning(false) }}>Continue session</button>
               </div>
             )}
 
-            <div className="mb-4 sm:mb-6">
-              <div className="flex flex-col sm:flex-row justify-between text-sm text-gray-600 mb-2 gap-1 sm:gap-4">
-                <span className="font-medium">Definition {currentQuestionIndex + 1} of {questions.length}</span>
-                <div className="flex flex-col sm:flex-row gap-1 sm:gap-4">
-                  <span className="text-sm">{score} correct so far</span>
-                  <span className={`font-bold text-base sm:text-lg ${isAboveThreshold ? 'text-green-600' : 'text-red-600'}`}>
-                    {currentRate.toFixed(1)} correct/min
-                  </span>
-                </div>
+            <section className="bl-live-status">
+              <div className="bl-live-metrics">
+                <div><span>Item</span><strong>{String(currentQuestionIndex + 1).padStart(2, '0')} / {String(questions.length).padStart(2, '0')}</strong></div>
+                <div><span>Correct</span><strong>{score}</strong></div>
+                <div className={isAboveThreshold ? 'is-on-aim' : ''}><span>Rate</span><strong>{currentRate.toFixed(1)} <small>/min</small></strong></div>
+                <div><span>Terms left</span><strong>{remainingTerms.length}</strong></div>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2 sm:h-2 mb-3">
-                <div
-                  className="bg-blue-600 h-2 sm:h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
+              <div className="bl-live-bars">
+                <div><span>Pack progress</span><div className="bl-progress-track"><i style={{ width: `${progress}%` }} /></div></div>
+                <div><span>Fluency · aim {threshold}/min</span><div className="bl-progress-track bl-rate-progress"><i className={isAboveThreshold ? 'is-on-aim' : ''} style={{ width: `${barPercentage}%` }} /></div></div>
               </div>
-              <div className="w-full bg-gray-200 rounded h-2">
-                <div
-                  className={`${isAboveThreshold ? 'bg-green-500' : 'bg-red-500'} h-2 rounded transition-all duration-300`}
-                  style={{ width: `${barPercentage}%` }}
-                />
-              </div>
-              <div className="mt-1 text-xs text-gray-600">Target: {threshold}/min</div>
-            </div>
+            </section>
 
-            <div className="bg-white rounded-lg shadow-lg p-4 sm:p-6">
-              <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 leading-relaxed text-gray-900">
-                {currentQuestion.question_text}
-              </h2>
+            <section className="bl-question-panel bl-typed-panel">
+              <div className="bl-question-label"><span>Definition</span><b>{String(currentQuestionIndex + 1).padStart(2, '0')}</b></div>
+              <h1>{currentQuestion.question_text}</h1>
 
               {(currentQuestion.hint && currentQuestion.hint.trim().length > 0) && !showFeedback && (
-                <div className="mb-4">
-                  <button
-                    onClick={() => setHintShown(v => !v)}
-                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm"
-                  >
-                    {hintShown ? 'Hide Hint' : 'Show Hint'}
-                  </button>
-                  {hintShown && (
-                    <div className="mt-3 text-sm bg-purple-50 border border-purple-200 text-purple-900 rounded p-3">
-                      {currentQuestion.hint}
-                    </div>
-                  )}
+                <div className="bl-hint-wrap">
+                  <button onClick={() => setHintShown(v => !v)} className="bl-hint-toggle">{hintShown ? 'Hide Hint' : 'Show Hint'}</button>
+                  {hintShown && <div className="bl-hint-panel">{currentQuestion.hint}</div>}
                 </div>
               )}
 
-              <div className="mb-4">
+              <div className="bl-typed-response">
+                <label htmlFor="typed-term">Matching term</label>
                 <input
+                  id="typed-term"
                   type="text"
                   value={typed}
                   onChange={(e) => setTyped(e.target.value)}
                   onFocus={startIdleTimers}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400 caret-gray-900 appearance-none"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim() && !showFeedback) submitAnswer() }}
+                  className="bl-typed-input"
                   placeholder="Type the matching term..."
                   disabled={showFeedback}
                   autoCapitalize="none"
@@ -543,87 +485,58 @@ export default function QuizTakerBankedTyped() {
               </div>
 
               {showFeedback && (
-                <div
-                  className={`p-3 sm:p-4 rounded-lg mb-4 sm:mb-6 ${
-                    normalize(typed) && correctTerm && normalize(typed) === normalize(correctTerm.term_text)
-                      ? 'bg-green-100 border border-green-300'
-                      : 'bg-red-100 border border-red-300'
-                  }`}
-                >
-                  <div className="font-semibold mb-2 text-sm sm:text-base text-gray-900">
-                    {normalize(typed) && correctTerm && normalize(typed) === normalize(correctTerm.term_text)
-                      ? '✅ Correct'
-                      : '❌ Incorrect'}
-                  </div>
-                  <div className="text-sm text-gray-800 mb-1">
-                    Correct answer: <strong>{correctTerm?.term_text ?? 'Correct term'}</strong>
-                  </div>
-                  <div className="text-sm text-gray-800 leading-relaxed">
-                    {currentQuestion.explanation}
-                  </div>
+                <div className={`bl-feedback ${typedIsCorrect ? 'is-correct' : 'is-incorrect'}`}>
+                  <span>{typedIsCorrect ? 'Correct response' : 'Not quite'}</span>
+                  <strong>{correctTerm?.term_text ?? 'Correct term'}</strong>
+                  <p>{currentQuestion.explanation}</p>
                 </div>
               )}
 
-              <div className="flex justify-center sm:justify-end">
+              <div className="bl-response-actions">
                 {!showFeedback ? (
-                  <button
-                    onClick={submitAnswer}
-                    disabled={typed.trim().length === 0}
-                    className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 sm:py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
-                  >
-                    Submit Answer
-                  </button>
+                  <button onClick={submitAnswer} disabled={typed.trim().length === 0} className="bl-button">Check response <span>→</span></button>
                 ) : (
-                  <button
-                    onClick={nextQuestion}
-                    className="w-full sm:w-auto bg-green-600 text-white px-6 py-3 sm:py-2 rounded-lg hover:bg-green-700 font-medium"
-                  >
-                    {currentQuestionIndex < questions.length - 1 ? 'Next Definition' : 'Finish Quiz'}
-                  </button>
+                  <button onClick={nextQuestion} className="bl-button">{currentQuestionIndex < questions.length - 1 ? 'Next definition' : 'Finish timing'} <span>→</span></button>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
+            </section>
+        </main>
       </div>
     )
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
-      <h1 className="text-3xl font-bold text-center mb-8">Select a Banked (Typed) Quiz</h1>
+    <div className="bl-page bl-session-page">
+      <main className="bl-session-shell bl-start-wrap">
+      <section className="bl-start-panel bl-selection-panel">
+      <div className="bl-start-copy"><p className="bl-kicker">Typed practice</p><h1>Select a fluency pack</h1></div>
 
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-2">Your Name:</label>
+      <div className="bl-name-field">
+        <label>Your name</label>
         <input
           type="text"
           value={studentName}
           onChange={(e) => setStudentName(e.target.value)}
-          className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400 caret-gray-900 appearance-none"
+          className="bl-typed-input"
           placeholder="Enter your name..."
         />
       </div>
 
-      <div className="space-y-4">
+      <div className="bl-selection-list">
         {quizzes.length === 0 ? (
-          <p className="text-gray-600 text-center">No free banked quizzes available yet.</p>
+          <p>No fluency packs are available yet.</p>
         ) : (
           quizzes.map((quiz) => (
-            <div key={quiz.id} className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-2">{quiz.title}</h3>
-              <p className="text-gray-600 mb-4">{quiz.description}</p>
-              <button
-                onClick={() => startQuiz(quiz)}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Start Quiz
-              </button>
+            <div key={quiz.id} className="bl-selection-item">
+              <div><h3>{quiz.title}</h3><p>{quiz.description}</p></div>
+              <button onClick={() => startQuiz(quiz)} className="bl-button">Start <span>→</span></button>
             </div>
           ))
         )}
       </div>
+      </section>
+      </main>
     </div>
   )
 }
-
 
