@@ -6,8 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import PaymentButton from '@/components/payment/PaymentButton'
 import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '@/contexts/AuthContext'
-import Image from 'next/image'
-import { ArrowLeft, Clock, Users } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 
 type QuizMode = 'mcq' | 'banked'
 type ResponseMode = 'options' | 'typed' | null
@@ -106,7 +105,6 @@ function CategoryPageContent() {
     setPurchasedQuizzes(data || [])
   }
 
-  // Load per-quiz performance for this user (BEST accuracy & BEST fluency)
   useEffect(() => {
     const loadPerformanceData = async () => {
       if (!user || quizzes.length === 0) return
@@ -118,20 +116,21 @@ function CategoryPageContent() {
       if (error || !data) return
 
       const byQuiz = new Map<string, AttemptRow[]>()
-      data.forEach(r => {
-        if (!byQuiz.has(r.quiz_id)) byQuiz.set(r.quiz_id, [])
-        byQuiz.get(r.quiz_id)!.push(r)
+      data.forEach(row => {
+        if (!byQuiz.has(row.quiz_id)) byQuiz.set(row.quiz_id, [])
+        byQuiz.get(row.quiz_id)!.push(row)
       })
 
       const stats: Record<string, PerfStats> = {}
-      quizzes.forEach(q => {
-        const rows = byQuiz.get(q.id) || []
+      quizzes.forEach(quiz => {
+        const rows = byQuiz.get(quiz.id) || []
         if (rows.length === 0) {
-          stats[q.id] = { bestAccuracy: null, bestFluency: null }
+          stats[quiz.id] = { bestAccuracy: null, bestFluency: null }
         } else {
-          const bestAccuracy = Math.max(...rows.map(r => r.accuracy_percentage ?? 0))
-          const bestFluency = Math.max(...rows.map(r => r.fluency_rate ?? 0))
-          stats[q.id] = { bestAccuracy, bestFluency }
+          stats[quiz.id] = {
+            bestAccuracy: Math.max(...rows.map(row => row.accuracy_percentage ?? 0)),
+            bestFluency: Math.max(...rows.map(row => row.fluency_rate ?? 0)),
+          }
         }
       })
       setPerfByQuiz(stats)
@@ -161,8 +160,8 @@ function CategoryPageContent() {
       try {
         localStorage.clear()
         sessionStorage.clear()
-        document.cookie.split(';').forEach((c) => {
-          document.cookie = c
+        document.cookie.split(';').forEach((cookie) => {
+          document.cookie = cookie
             .replace(/^ +/, '')
             .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`)
         })
@@ -177,291 +176,189 @@ function CategoryPageContent() {
     }
   }
 
-  const colorThemes = {
-    blue: 'from-blue-500 to-blue-600',
-    purple: 'from-purple-500 to-purple-600',
-    green: 'from-green-500 to-green-600',
-    orange: 'from-orange-500 to-orange-600',
-    red: 'from-red-500 to-red-600',
-    indigo: 'from-indigo-500 to-indigo-600',
-  }
-
-  // Group fluency quizzes into options and typed columns
   const bankedOptions = useMemo(
-    () => quizzes.filter(q => q.quiz_mode === 'banked' && (q.response_mode ?? 'options') === 'options'),
+    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && (quiz.response_mode ?? 'options') === 'options'),
     [quizzes]
   )
+
   const bankedTyped = useMemo(
-    () => quizzes.filter(q => q.quiz_mode === 'banked' && q.response_mode === 'typed'),
+    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed'),
     [quizzes]
   )
 
-  // Small quiz card with mastery colour logic + stats
   const SmallQuizCard = ({ quiz }: { quiz: Quiz }) => {
-    const isOwned = user && purchasedQuizzes.some(p => p.quiz_id === quiz.id)
-    const perf = perfByQuiz[quiz.id]
-    const acc = perf?.bestAccuracy ?? null
-    const flu = perf?.bestFluency ?? null
+    const isOwned = Boolean(user && purchasedQuizzes.some(purchase => purchase.quiz_id === quiz.id))
+    const performance = perfByQuiz[quiz.id]
+    const accuracy = performance?.bestAccuracy ?? null
+    const fluency = performance?.bestFluency ?? null
+    const mode = quiz.response_mode === 'typed' ? 'Typed' : 'Options'
+    const aim = mode === 'Typed' ? 8 : 15
 
-    // fluency aims by type
-    let aim = 8 // MCQ
-    if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'options') aim = 15 // Options aim lowered from 17 → 15
-    if (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed') aim = 8 // Typed
-
-    // status colours (bg + border) based on BEST fluency + 100% accuracy
-    let bgClass = 'bg-red-50'
-    let borderClass = 'border-red-300'
-    if (acc === 100 && (flu ?? 0) >= aim) {
-      bgClass = 'bg-green-50'
-      borderClass = 'border-green-300'
-    } else if (acc === 100) {
-      bgClass = 'bg-amber-50'
-      borderClass = 'border-amber-300'
+    let state: 'learning' | 'accurate' | 'fluent' = 'learning'
+    let stateLabel = accuracy === null ? 'Not yet practised' : 'Building'
+    if (accuracy === 100 && (fluency ?? 0) >= aim) {
+      state = 'fluent'
+      stateLabel = 'Fluent'
+    } else if (accuracy === 100) {
+      state = 'accurate'
+      stateLabel = 'Accurate'
     }
 
-    const badge =
-      (quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed')
-        ? 'Typed'
-        : (quiz.quiz_mode === 'banked' ? 'Options' : 'MCQ')
-
-    const badgeStyle =
-      badge === 'Typed' ? 'bg-purple-100 text-purple-800'
-      : badge === 'Options' ? 'bg-emerald-100 text-emerald-800'
-      : 'bg-blue-100 text-blue-800'
-
-    const bestAccStr = acc !== null ? `${acc}%` : '—'
-    const bestFluStr = flu !== null ? `${flu.toFixed(1)}/min` : '—'
+    const bestAccuracy = accuracy !== null ? `${accuracy}%` : '—'
+    const bestFluency = fluency !== null ? `${fluency.toFixed(1)}/min` : '—'
 
     return (
-      <div
-        className={[
-          'rounded-xl p-4 border-2 shadow-sm transition-all',
-          bgClass,
-          borderClass,
-          'hover:shadow-md hover:brightness-[0.98]',
-        ].join(' ')}
-        aria-label={`Quiz card: ${quiz.title}`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <h4 className="font-semibold text-gray-900 text-sm line-clamp-2">
-            {quiz.title}
-          </h4>
-          <span
-            className={`ml-2 inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full ${badgeStyle}`}
-          >
-            {badge}
-          </span>
+      <article className={`bl-quiz-card bl-quiz-card-${state}`} aria-label={`Practice set: ${quiz.title}`}>
+        <div className="bl-quiz-card-top">
+          <span className={`bl-mode-badge bl-mode-${mode.toLowerCase()}`}>{mode}</span>
+          <span className="bl-state-label"><i aria-hidden="true" />{stateLabel}</span>
         </div>
 
-        {quiz.description && (
-          <p className="text-xs text-gray-700 mt-1 line-clamp-2">{quiz.description}</p>
-        )}
+        <h3>{quiz.title}</h3>
+        {quiz.description && <p className="bl-quiz-description">{quiz.description}</p>}
 
-        {/* Stats */}
-        <div className="mt-3 flex items-center justify-between text-[11px] text-gray-800">
-          <span>⭐ Best Acc: <span className="font-medium">{bestAccStr}</span></span>
-          <span>⚡ Best Fluency: <span className="font-medium">{bestFluStr}</span></span>
-        </div>
+        <dl className="bl-quiz-metrics">
+          <div><dt>Best accuracy</dt><dd>{bestAccuracy}</dd></div>
+          <div><dt>Best rate</dt><dd>{bestFluency}</dd></div>
+          <div><dt>Aim</dt><dd>{aim}/min</dd></div>
+        </dl>
 
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-[11px] text-gray-700">
-            {quiz.is_free ? 'Free' : quiz.price ? `£${quiz.price}` : 'Paid'}
-          </span>
-
+        <div className="bl-quiz-card-bottom">
+          <span className="bl-access-label">{quiz.is_free ? 'Included' : quiz.price ? `£${quiz.price}` : 'Paid access'}</span>
           {isOwned ? (
-            <button
-              onClick={() => startQuiz(quiz.id)}
-              className="text-xs px-3 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
-            >
-              Take Quiz
-            </button>
+            <button className="bl-button bl-card-action" onClick={() => startQuiz(quiz.id)}>Practise again</button>
           ) : quiz.is_free ? (
-            <button
-              onClick={() => startQuiz(quiz.id)}
-              className="text-xs px-3 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Start
-            </button>
+            <button className="bl-button bl-card-action" onClick={() => startQuiz(quiz.id)}>Start practice</button>
           ) : (
-            <div className="min-w-[96px]">
+            <div className="bl-payment-wrap">
               <PaymentButton
                 quizId={quiz.id}
                 price={quiz.price}
                 title={quiz.title}
-                className="w-full !text-xs !py-1"
+                className="bl-card-action"
                 onAuthRequired={() => handleAuthModalOpen('register')}
               />
             </div>
           )}
         </div>
+      </article>
+    )
+  }
+
+  const PracticeColumn = ({
+    code,
+    title,
+    description,
+    items,
+  }: {
+    code: string
+    title: string
+    description: string
+    items: Quiz[]
+  }) => (
+    <section className="bl-practice-column">
+      <div className="bl-practice-column-head">
+        <div>
+          <span>{code}</span>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <strong aria-label={`${items.length} practice sets`}>{items.length}</strong>
+      </div>
+      {items.length === 0 ? (
+        <div className="bl-column-empty">No practice sets available yet.</div>
+      ) : (
+        <div className="bl-quiz-list">{items.map(quiz => <SmallQuizCard key={quiz.id} quiz={quiz} />)}</div>
+      )}
+    </section>
+  )
+
+  if (loading || authLoading) {
+    return (
+      <div className="bl-page bl-loading" role="status" aria-live="polite">
+        <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
+        <p className="bl-kicker">Loading practice sets</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Header */}
-      <header className="backdrop-blur-sm bg-white/80 border-b border-gray-200/50 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
-          <div className="flex flex-col space-y-3 sm:flex-row sm:justify-between sm:items-center sm:space-y-0 min-w-0">
-            <div className="flex items-center space-x-3">
-              <div className="relative min-w-0 flex-shrink-0">
-                <Image
-                  src="/images/logo-header.png"
-                  alt="Dr May's Adaptive Learning Analytics"
-                  width={320}
-                  height={80}
-                  className="h-10 w-auto sm:h-14 md:h-16 lg:h-20 max-w-none"
-                />
-              </div>
-            </div>
-            <div className="flex flex-col sm:items-end space-y-2">
-              {user ? (
-                <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
-                  <span className="text-gray-700 text-sm sm:text-base">
-                    Welcome, {user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'User'}
-                  </span>
-                  <div className="flex space-x-2 sm:space-x-3">
-                    <button
-                      onClick={() => router.push('/')}
-                      className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 text-xs sm:text-sm whitespace-nowrap shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    >
-                      📚 My Quizzes
-                    </button>
-                    <button
-                      onClick={() => router.push('/progress')}
-                      className="bg-gradient-to-r from-purple-500 to-blue-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:from-purple-600 hover:to-blue-700 transition-all duration-200 text-xs sm:text-sm whitespace-nowrap shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    >
-                      📊 Progress
-                    </button>
-                    <button
-                      onClick={handleSignOut}
-                      className="bg-gradient-to-r from-gray-600 to-gray-700 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg hover:from-gray-700 hover:to-gray-800 transition-all duration-200 text-xs sm:text-sm shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                    >
-                      👋 Sign Out
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
-                  <button
-                    onClick={() => handleAuthModalOpen('login')}
-                    className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                  >
-                    Login
-                  </button>
-                  <button
-                    onClick={() => handleAuthModalOpen('register')}
-                    className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-2 rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 text-sm shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                  >
-                    Get Started
-                  </button>
-                </div>
-              )}
-            </div>
+    <div className="bl-page">
+      <header className="bl-header">
+        <div className="bl-container bl-header-inner">
+          <button className="bl-wordmark" onClick={() => router.push('/')} aria-label="BehaviorLingo home">
+            <span className="bl-wordmark-mark" aria-hidden="true">BL</span>
+            <span>behavior<span>lingo</span></span>
+          </button>
+
+          <div className="bl-header-actions">
+            {user ? (
+              <>
+                <span className="bl-user-label">Signed in as <strong>{user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'learner'}</strong></span>
+                <button className="bl-button bl-button-quiet" onClick={() => router.push('/')}>Modules</button>
+                <button className="bl-button bl-button-quiet" onClick={() => router.push('/progress')}>Progress</button>
+                <button className="bl-text-button" onClick={handleSignOut}>Sign out</button>
+              </>
+            ) : (
+              <>
+                <button className="bl-text-button" onClick={() => handleAuthModalOpen('login')}>Log in</button>
+                <button className="bl-button bl-button-small" onClick={() => handleAuthModalOpen('register')}>Create account</button>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Breadcrumb */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <button
-          onClick={() => router.push('/')}
-          className="flex items-center text-blue-600 hover:text-blue-800 transition-colors mb-6"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Categories
-        </button>
-      </div>
+      <main className="bl-category-main">
+        <div className="bl-container">
+          <button className="bl-back-link" onClick={() => router.push('/')}>
+            <ArrowLeft size={16} strokeWidth={2} /> All modules
+          </button>
 
-      {/* Category header */}
-      {category && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
-          <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-gray-200/50 mb-12">
-            <div className="flex items-start gap-6">
-              <div className={`w-16 h-16 bg-gradient-to-r ${colorThemes[category.color_class as keyof typeof colorThemes] || colorThemes.blue} rounded-2xl flex items-center justify-center flex-shrink-0`}>
-                <span className="text-white text-2xl">📚</span>
-              </div>
-              <div className="flex-1">
-                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-                  {category.name}
-                </h1>
-                <p className="text-xl text-gray-600 mb-6">
-                  {category.description}
-                </p>
-                <div className="flex flex-wrap gap-6 text-sm text-gray-600">
-                  <div className="flex items-center">
-                    <Clock className="w-4 h-4 mr-2 text-blue-600" />
-                    Fluency-Based Learning
-                  </div>
-                  <div className="flex items-center">
-                    <Users className="w-4 h-4 mr-2 text-green-600" />
-                    Individualised feedback
-                  </div>
-                </div>
-              </div>
+          <section className="bl-category-intro">
+            <div className="bl-category-code">CONTENT_AREA</div>
+            <h1>{category?.name || 'Fluency practice'}</h1>
+            <p>{category?.description}</p>
+            <div className="bl-category-meta">
+              <span><i aria-hidden="true" /> Options aim: 15/min</span>
+              <span><i aria-hidden="true" /> Typed aim: 8/min</span>
+              <span><i aria-hidden="true" /> 100% accuracy target</span>
             </div>
+          </section>
+
+          <div className="bl-mastery-key" aria-label="Mastery status key">
+            <span>Card status</span>
+            <span><i className="bl-key-learning" />Building</span>
+            <span><i className="bl-key-accurate" />Accurate</span>
+            <span><i className="bl-key-fluent" />Fluent</span>
           </div>
+
+          {quizzes.length === 0 ? (
+            <div className="bl-empty-state bl-category-empty">
+              <span className="bl-empty-code">CONTENT_LOADING</span>
+              <h2>Practice sets are in preparation.</h2>
+              <p>More content for this area is coming soon.</p>
+              <button className="bl-button bl-button-primary" onClick={() => router.push('/')}>Explore other modules</button>
+            </div>
+          ) : (
+            <div className="bl-practice-columns">
+              <PracticeColumn
+                code="MODE_01"
+                title="Options practice"
+                description="Build accurate discrimination with response support."
+                items={bankedOptions}
+              />
+              <PracticeColumn
+                code="MODE_02"
+                title="Typed practice"
+                description="Strengthen independent retrieval without response prompts."
+                items={bankedTyped}
+              />
+            </div>
+          )}
         </div>
-      )}
+      </main>
 
-      {/* Fluency quizzes: two columns */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-            {category?.name} Quizzes
-          </h2>
-        <p className="text-base text-gray-600 max-w-3xl mx-auto">
-            Turn your quiz cards from <span className="font-semibold text-red-600">red</span> ➜ <span className="font-semibold text-amber-600">amber</span> ➜ <span className="font-semibold text-green-600">green</span> by mastering fluency and accuracy!
-          </p>
-        </div>
-
-        {quizzes.length === 0 ? (
-          <div className="text-center py-12 bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50">
-            <div className="text-6xl mb-4">📚</div>
-            <h3 className="text-2xl font-semibold text-gray-700 mb-2">New optibl Quizzes Coming Soon!</h3>
-            <p className="text-gray-600 mb-6">{category?.name} content in prep. Check back soon!</p>
-            <button
-              onClick={() => router.push('/')}
-              className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-            >
-              Explore Other Categories
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* column renderer */}
-            {(() => {
-              const Column = ({ title, chipClass, items }: { title: string; chipClass: string; items: Quiz[] }) => (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-                    <span className={`text-xs ${chipClass} px-2 py-0.5 rounded-full`}>{items.length}</span>
-                  </div>
-                  {items.length === 0 ? (
-                    <div className="text-sm text-gray-500 bg-white/70 border border-gray-200 rounded-xl p-4">
-                      No quizzes yet.
-                    </div>
-                  ) : (
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-1 gap-3">
-                      {items.map(q => <SmallQuizCard key={q.id} quiz={q} />)}
-                    </div>
-                  )}
-                </div>
-              )
-
-              return (
-                <>
-                  <Column title="Fluency Terms (Options)" chipClass="bg-emerald-50 text-emerald-700" items={bankedOptions} />
-                  <Column title="Fluency Terms (Typed)" chipClass="bg-purple-50 text-purple-700" items={bankedTyped} />
-                </>
-              )
-            })()}
-          </div>
-        )}
-      </div>
-
-      {/* Auth Modal */}
       <AuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
@@ -469,27 +366,16 @@ function CategoryPageContent() {
         onSwitchMode={(newMode: 'login' | 'register' | 'reset') => setAuthMode(newMode)}
       />
 
-      {/* Footer */}
-      <footer className="bg-white/80 backdrop-blur-sm border-t border-gray-200/50 mt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
-            <div className="flex items-center space-x-3">
-              <Image
-                src="/images/icon.png"
-                alt="optibl icon"
-                width={24}
-                height={24}
-                className="w-6 h-6"
-              />
-              <span className="text-gray-600">© 2025 optibl</span>
-            </div>
-            <div className="flex space-x-6 text-sm">
-              <button onClick={() => router.push('/about')} className="text-gray-600 hover:text-blue-600 transition-colors">About optibl</button>
-              <button onClick={() => router.push('/privacy')} className="text-gray-600 hover:text-blue-600 transition-colors">Privacy Policy</button>
-              <button onClick={() => router.push('/terms')} className="text-gray-600 hover:text-blue-600 transition-colors">Terms of Service</button>
-              <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer" className="text-gray-600 hover:text-blue-600 transition-colors">About Dr May</a>
-            </div>
+      <footer className="bl-footer">
+        <div className="bl-container bl-footer-inner">
+          <div><div className="bl-footer-wordmark">behavior<span>lingo</span></div><p>Fluency training for behaviour analysis.</p></div>
+          <div className="bl-footer-links">
+            <button onClick={() => router.push('/about')}>About</button>
+            <button onClick={() => router.push('/privacy')}>Privacy</button>
+            <button onClick={() => router.push('/terms')}>Terms</button>
+            <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer">Dr May</a>
           </div>
+          <span className="bl-copyright">© 2026 BehaviorLingo</span>
         </div>
       </footer>
     </div>
@@ -499,11 +385,9 @@ function CategoryPageContent() {
 export default function CategoryPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <div className="text-xl text-gray-700 animate-pulse">Loading category...</div>
-        </div>
+      <div className="bl-page bl-loading" role="status" aria-live="polite">
+        <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
+        <p className="bl-kicker">Loading module</p>
       </div>
     }>
       <CategoryPageContent />

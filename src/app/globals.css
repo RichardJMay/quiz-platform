@@ -756,6 +756,338 @@ a:focus-visible {
   color: var(--bl-ink-soft);
 }
 
+/* Category and practice-selection page */
+.bl-category-main {
+  min-height: 72vh;
+  padding: 36px 0 clamp(82px, 10vw, 132px);
+}
+
+.bl-back-link {
+  min-height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--bl-forest);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.bl-back-link:hover {
+  color: var(--bl-ink);
+}
+
+.bl-category-intro {
+  max-width: 900px;
+  padding: clamp(44px, 7vw, 82px) 0 48px;
+}
+
+.bl-category-code {
+  display: inline-block;
+  padding: 6px 8px;
+  color: var(--bl-lcd-light);
+  background: var(--bl-forest);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.bl-category-intro h1 {
+  margin: 20px 0 18px;
+  font-size: clamp(2.75rem, 6vw, 5.5rem);
+  font-weight: 670;
+  letter-spacing: -0.068em;
+  line-height: 0.98;
+}
+
+.bl-category-intro > p {
+  max-width: 730px;
+  margin: 0;
+  color: var(--bl-ink-soft);
+  font-size: clamp(1rem, 1.7vw, 1.2rem);
+  line-height: 1.65;
+}
+
+.bl-category-meta {
+  margin-top: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 11px 20px;
+  color: var(--bl-ink-soft);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.7rem;
+}
+
+.bl-category-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bl-category-meta i {
+  width: 6px;
+  height: 6px;
+  background: var(--bl-forest);
+}
+
+.bl-mastery-key {
+  margin-bottom: 20px;
+  padding: 13px 15px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  color: var(--bl-ink-soft);
+  background: rgba(230, 236, 210, 0.7);
+  border: 1px solid var(--bl-line);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.67rem;
+}
+
+.bl-mastery-key > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.bl-mastery-key > span:first-child {
+  margin-right: auto;
+  color: var(--bl-forest);
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.bl-mastery-key i {
+  width: 8px;
+  height: 8px;
+}
+
+.bl-key-learning { background: #a8674e; }
+.bl-key-accurate { background: #b58b31; }
+.bl-key-fluent { background: #2f6c4a; }
+
+.bl-practice-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 22px;
+}
+
+.bl-practice-column {
+  min-width: 0;
+  background: rgba(251, 252, 245, 0.58);
+  border: 1px solid var(--bl-ink);
+  box-shadow: 6px 6px 0 rgba(33, 74, 54, 0.15);
+}
+
+.bl-practice-column-head {
+  min-height: 176px;
+  padding: 26px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 22px;
+  color: var(--bl-lcd-light);
+  background: var(--bl-forest-deep);
+  border-bottom: 1px solid var(--bl-ink);
+}
+
+.bl-practice-column-head > div > span {
+  color: var(--bl-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.bl-practice-column-head h2 {
+  margin: 15px 0 9px;
+  color: var(--bl-white);
+  font-size: clamp(1.45rem, 2.2vw, 1.9rem);
+  font-weight: 660;
+  letter-spacing: -0.04em;
+}
+
+.bl-practice-column-head p {
+  max-width: 420px;
+  margin: 0;
+  color: rgba(230, 236, 210, 0.67);
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
+.bl-practice-column-head > strong {
+  min-width: 39px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  color: var(--bl-forest-deep);
+  background: var(--bl-accent);
+  border: 1px solid var(--bl-accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.76rem;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.28);
+}
+
+.bl-quiz-list {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.bl-quiz-card {
+  --card-state: #a8674e;
+  position: relative;
+  min-width: 0;
+  padding: 20px;
+  overflow: hidden;
+  background: var(--bl-white);
+  border: 1px solid var(--bl-ink);
+  border-left: 5px solid var(--card-state);
+}
+
+.bl-quiz-card-learning { --card-state: #a8674e; }
+.bl-quiz-card-accurate { --card-state: #b58b31; }
+.bl-quiz-card-fluent { --card-state: #2f6c4a; }
+
+.bl-quiz-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bl-mode-badge,
+.bl-state-label,
+.bl-access-label {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.63rem;
+  font-weight: 700;
+}
+
+.bl-mode-badge {
+  padding: 4px 6px;
+  color: var(--bl-forest-deep);
+  border: 1px solid var(--bl-line);
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.bl-mode-options { background: var(--bl-lcd); }
+.bl-mode-typed { background: #d7d5be; }
+
+.bl-state-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--bl-ink-soft);
+}
+
+.bl-state-label i {
+  width: 7px;
+  height: 7px;
+  background: var(--card-state);
+}
+
+.bl-quiz-card h3 {
+  margin: 21px 0 8px;
+  font-size: 1.05rem;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.bl-quiz-description {
+  margin: 0;
+  color: var(--bl-ink-soft);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.bl-quiz-metrics {
+  margin: 20px 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--bl-line);
+  border-bottom: 1px solid var(--bl-line);
+}
+
+.bl-quiz-metrics > div {
+  min-width: 0;
+  padding: 12px 8px;
+  border-right: 1px solid var(--bl-line);
+}
+
+.bl-quiz-metrics > div:first-child { padding-left: 0; }
+.bl-quiz-metrics > div:last-child { padding-right: 0; border-right: 0; }
+
+.bl-quiz-metrics dt {
+  color: var(--bl-moss);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.57rem;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.bl-quiz-metrics dd {
+  margin: 5px 0 0;
+  color: var(--bl-ink);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.78rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.bl-quiz-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.bl-access-label {
+  color: var(--bl-moss);
+}
+
+.bl-card-action {
+  min-height: 41px !important;
+  padding: 0.58rem 0.85rem !important;
+  border-radius: 2px !important;
+  font-family: var(--font-geist-mono), monospace !important;
+  font-size: 0.7rem !important;
+  font-weight: 750 !important;
+  white-space: nowrap;
+}
+
+.bl-payment-wrap {
+  min-width: 120px;
+}
+
+.bl-payment-wrap .bl-card-action {
+  width: 100%;
+}
+
+.bl-column-empty {
+  margin: 14px;
+  padding: 28px;
+  color: var(--bl-moss);
+  border: 1px dashed var(--bl-line);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.bl-category-empty {
+  margin-bottom: 30px;
+}
+
 .bl-footer {
   padding: 46px 0;
   color: rgba(251, 252, 245, 0.7);
@@ -874,7 +1206,8 @@ a:focus-visible {
 
   .bl-feature-grid,
   .bl-method-grid,
-  .bl-practice-grid {
+  .bl-practice-grid,
+  .bl-practice-columns {
     grid-template-columns: 1fr;
   }
 
@@ -918,6 +1251,61 @@ a:focus-visible {
 
   .bl-user-label {
     text-align: left;
+  }
+
+  .bl-category-main {
+    padding-top: 22px;
+  }
+
+  .bl-category-intro {
+    padding: 38px 0 34px;
+  }
+
+  .bl-category-intro h1 {
+    font-size: clamp(2.55rem, 13vw, 4rem);
+  }
+
+  .bl-category-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .bl-mastery-key {
+    justify-content: flex-start;
+  }
+
+  .bl-mastery-key > span:first-child {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .bl-practice-column-head {
+    min-height: 0;
+    padding: 22px;
+  }
+
+  .bl-quiz-list {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .bl-quiz-card {
+    padding: 17px;
+  }
+
+  .bl-quiz-card-top {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .bl-quiz-card-bottom {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bl-card-action,
+  .bl-payment-wrap {
+    width: 100%;
   }
 
   .bl-hero-copy h1 {
