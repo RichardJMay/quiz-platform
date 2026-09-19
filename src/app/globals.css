@@ -2389,7 +2389,7 @@ a:focus-visible {
 
 .bl-technical-content {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 1px solid var(--bl-ink);
 }
 

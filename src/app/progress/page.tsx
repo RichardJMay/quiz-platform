@@ -42,7 +42,8 @@ interface BayesianModel {
   }>
   curve: ChartPoint[]
   next: { median: number; lower: number; upper: number }
-  masteryProbability: number
+  masteryProbability: number | null
+  ceiling: number
   status: 'early' | 'developing' | 'established'
 }
 
@@ -54,6 +55,13 @@ const FORECAST_ATTEMPTS = 3
 const FLUENCY_AIMS: Record<ResponseMode, number> = {
   options: 15,
   typed: 8,
+}
+
+// Conservative task-level guardrails. If recorded item speed already exceeds
+// one, the model raises it enough to contain the observed performance.
+const BASE_RATE_CEILINGS: Record<ResponseMode, number> = {
+  options: 60,
+  typed: 35,
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -107,19 +115,189 @@ const sampleGamma = (shape: number, random: () => number): number => {
   }
 }
 
-const sampleBeta = (alpha: number, beta: number, random: () => number) => {
-  const x = sampleGamma(alpha, random)
-  const y = sampleGamma(beta, random)
-  return x / (x + y)
+type Vector2 = [number, number]
+type Matrix2 = [[number, number], [number, number]]
+
+interface LogisticPosterior {
+  mean: Vector2
+  covariance: Matrix2
 }
 
-const tCritical80 = (degreesOfFreedom: number) => {
-  const z = 1.281551565545
-  const df = Math.max(2, degreesOfFreedom)
-  return z + (z ** 3 + z) / (4 * df) + (5 * z ** 5 + 16 * z ** 3 + 3 * z) / (96 * df ** 2)
+interface SpeedPosterior {
+  mean: Vector2
+  covariance: Matrix2
+  shape: number
+  scale: number
+  floorSeconds: number
+  ceiling: number
 }
 
-function fitBayesianLearningCurve(attempts: QuizAttempt[], aim: number): BayesianModel | null {
+const logistic = (value: number) => {
+  if (value >= 0) return 1 / (1 + Math.exp(-value))
+  const exponential = Math.exp(value)
+  return exponential / (1 + exponential)
+}
+
+const invertSymmetric2 = (m00: number, m01: number, m11: number): Matrix2 => {
+  const determinant = Math.max(1e-10, m00 * m11 - m01 * m01)
+  return [
+    [m11 / determinant, -m01 / determinant],
+    [-m01 / determinant, m00 / determinant],
+  ]
+}
+
+const sampleBivariateNormal = (
+  mean: Vector2,
+  covariance: Matrix2,
+  random: () => number,
+  varianceMultiplier = 1,
+): Vector2 => {
+  const multiplier = Math.sqrt(Math.max(1e-12, varianceMultiplier))
+  const l00 = Math.sqrt(Math.max(1e-12, covariance[0][0]))
+  const l10 = covariance[1][0] / l00
+  const l11 = Math.sqrt(Math.max(1e-12, covariance[1][1] - l10 * l10))
+  const z0 = sampleNormal(random)
+  const z1 = sampleNormal(random)
+  return [
+    mean[0] + multiplier * l00 * z0,
+    mean[1] + multiplier * (l10 * z0 + l11 * z1),
+  ]
+}
+
+function fitAccuracyTrajectory(attempts: QuizAttempt[]): LogisticPosterior {
+  // Weakly informative priors: accuracy starts broadly around 75%, while the
+  // learning slope is centred at zero rather than assuming improvement.
+  const priorMean: Vector2 = [Math.log(0.75 / 0.25), 0]
+  const priorPrecision: Vector2 = [1 / 2.25, 1 / 0.64]
+  let estimate: Vector2 = [...priorMean]
+
+  for (let iteration = 0; iteration < 18; iteration += 1) {
+    let precision00 = priorPrecision[0]
+    let precision01 = 0
+    let precision11 = priorPrecision[1]
+    let gradient0 = priorPrecision[0] * (priorMean[0] - estimate[0])
+    let gradient1 = priorPrecision[1] * (priorMean[1] - estimate[1])
+
+    attempts.forEach((attempt, index) => {
+      const x = Math.log(index + 1)
+      const total = Math.max(1, attempt.total_questions)
+      const probability = logistic(estimate[0] + estimate[1] * x)
+      const weight = Math.max(1e-6, total * probability * (1 - probability))
+      const residual = attempt.correct_answers - total * probability
+      precision00 += weight
+      precision01 += weight * x
+      precision11 += weight * x * x
+      gradient0 += residual
+      gradient1 += residual * x
+    })
+
+    const covariance = invertSymmetric2(precision00, precision01, precision11)
+    const delta0 = covariance[0][0] * gradient0 + covariance[0][1] * gradient1
+    const delta1 = covariance[1][0] * gradient0 + covariance[1][1] * gradient1
+    estimate = [estimate[0] + delta0, estimate[1] + delta1]
+    if (Math.max(Math.abs(delta0), Math.abs(delta1)) < 1e-7) break
+  }
+
+  let precision00 = priorPrecision[0]
+  let precision01 = 0
+  let precision11 = priorPrecision[1]
+  attempts.forEach((attempt, index) => {
+    const x = Math.log(index + 1)
+    const probability = logistic(estimate[0] + estimate[1] * x)
+    const weight = Math.max(1e-6, attempt.total_questions * probability * (1 - probability))
+    precision00 += weight
+    precision01 += weight * x
+    precision11 += weight * x * x
+  })
+
+  return {
+    mean: estimate,
+    covariance: invertSymmetric2(precision00, precision01, precision11),
+  }
+}
+
+function fitSpeedTrajectory(attempts: QuizAttempt[], mode: ResponseMode): SpeedPosterior {
+  const potentialRates = attempts.map(attempt => {
+    const secondsPerItem = Math.max(
+      0.05,
+      (attempt.total_time_minutes * 60) / Math.max(1, attempt.total_questions),
+    )
+    return 60 / secondsPerItem
+  })
+  const observedGuard = Math.max(...potentialRates, 0) * 1.15
+  const ceiling = Math.ceil(Math.max(BASE_RATE_CEILINGS[mode], observedGuard) / 5) * 5
+  const floorSeconds = 60 / ceiling
+  const typicalSeconds = mode === 'typed' ? 6 : 4
+
+  // Model the log time above a mechanical response-time floor. This keeps
+  // predicted correct/min below a transparent, mode-specific task ceiling.
+  const priorMean: Vector2 = [Math.log(Math.max(0.25, typicalSeconds - floorSeconds)), 0]
+  const priorPrecision: Vector2 = [1 / 2.25, 1 / 0.49]
+  const priorShape = 2.5
+  const priorScale = 0.45
+  let xx00 = priorPrecision[0]
+  let xx01 = 0
+  let xx11 = priorPrecision[1]
+  let xy0 = priorPrecision[0] * priorMean[0]
+  let xy1 = priorPrecision[1] * priorMean[1]
+  let ySquared = 0
+
+  attempts.forEach((attempt, index) => {
+    const x = Math.log(index + 1)
+    const secondsPerItem = Math.max(
+      floorSeconds + 0.01,
+      (attempt.total_time_minutes * 60) / Math.max(1, attempt.total_questions),
+    )
+    const y = Math.log(Math.max(0.01, secondsPerItem - floorSeconds))
+    xx00 += 1
+    xx01 += x
+    xx11 += x * x
+    xy0 += y
+    xy1 += x * y
+    ySquared += y * y
+  })
+
+  const covariance = invertSymmetric2(xx00, xx01, xx11)
+  const mean: Vector2 = [
+    covariance[0][0] * xy0 + covariance[0][1] * xy1,
+    covariance[1][0] * xy0 + covariance[1][1] * xy1,
+  ]
+  const priorQuadratic =
+    priorPrecision[0] * priorMean[0] ** 2 + priorPrecision[1] * priorMean[1] ** 2
+  const posteriorQuadratic = mean[0] * xy0 + mean[1] * xy1
+
+  return {
+    mean,
+    covariance,
+    shape: priorShape + attempts.length / 2,
+    scale: Math.max(0.05, priorScale + 0.5 * (ySquared + priorQuadratic - posteriorQuadratic)),
+    floorSeconds,
+    ceiling,
+  }
+}
+
+function sampleLatentRate(
+  attemptNumber: number,
+  accuracy: LogisticPosterior,
+  speed: SpeedPosterior,
+  random: () => number,
+  includeSessionVariation: boolean,
+) {
+  const x = Math.log(attemptNumber)
+  const accuracyDraw = sampleBivariateNormal(accuracy.mean, accuracy.covariance, random)
+  const probability = logistic(accuracyDraw[0] + accuracyDraw[1] * x)
+  const variance = speed.scale / sampleGamma(speed.shape, random)
+  const speedDraw = sampleBivariateNormal(speed.mean, speed.covariance, random, variance)
+  const residual = includeSessionVariation ? Math.sqrt(variance) * sampleNormal(random) : 0
+  const secondsPerItem = speed.floorSeconds + Math.exp(speedDraw[0] + speedDraw[1] * x + residual)
+  return { probability, secondsPerItem, rate: (60 * probability) / secondsPerItem }
+}
+
+function fitBayesianLearningCurve(
+  attempts: QuizAttempt[],
+  aim: number,
+  mode: ResponseMode,
+): BayesianModel | null {
   if (!attempts.length) return null
 
   const chronological = attempts.slice().sort(
@@ -132,91 +310,27 @@ function fitBayesianLearningCurve(attempts: QuizAttempt[], aim: number): Bayesia
     date: attempt.completed_at,
   }))
 
-  // Exact conjugate Bayesian regression on log rate:
-  // log(rate) = intercept + slope * log(attempt) + error.
-  const priorMean: [number, number] = [Math.log(Math.max(1, aim * 0.45)), 0.2]
-  const priorPrecision: [number, number] = [1 / 1.44, 1 / 0.16]
-  const priorShape = 2.5
-  const priorScale = 0.35
-
-  let xx00 = priorPrecision[0]
-  let xx01 = 0
-  let xx11 = priorPrecision[1]
-  let xy0 = priorPrecision[0] * priorMean[0]
-  let xy1 = priorPrecision[1] * priorMean[1]
-  let ySquared = 0
-
-  observed.forEach(point => {
-    const x = Math.log(point.attempt)
-    const y = Math.log(Math.max(0.1, point.rate))
-    xx00 += 1
-    xx01 += x
-    xx11 += x * x
-    xy0 += y
-    xy1 += x * y
-    ySquared += y * y
-  })
-
-  const determinant = Math.max(1e-9, xx00 * xx11 - xx01 * xx01)
-  const covariance: [[number, number], [number, number]] = [
-    [xx11 / determinant, -xx01 / determinant],
-    [-xx01 / determinant, xx00 / determinant],
-  ]
-  const posteriorMean: [number, number] = [
-    covariance[0][0] * xy0 + covariance[0][1] * xy1,
-    covariance[1][0] * xy0 + covariance[1][1] * xy1,
-  ]
-
-  const priorQuadratic =
-    priorPrecision[0] * priorMean[0] ** 2 + priorPrecision[1] * priorMean[1] ** 2
-  const posteriorQuadratic = posteriorMean[0] * xy0 + posteriorMean[1] * xy1
-  const posteriorShape = priorShape + observed.length / 2
-  const posteriorScale = Math.max(
-    0.05,
-    priorScale + 0.5 * (ySquared + priorQuadratic - posteriorQuadratic),
-  )
-  const degreesOfFreedom = 2 * posteriorShape
-  const critical = tCritical80(degreesOfFreedom)
-
-  const evaluate = (attemptNumber: number, predictive: boolean) => {
-    const x = Math.log(attemptNumber)
-    const mean = posteriorMean[0] + posteriorMean[1] * x
-    const leverage =
-      covariance[0][0] + 2 * x * covariance[0][1] + x * x * covariance[1][1]
-    const variance = (posteriorScale / posteriorShape) * (Math.max(0, leverage) + (predictive ? 1 : 0))
-    const scale = Math.sqrt(Math.max(1e-9, variance))
-    return {
-      median: Math.exp(mean),
-      lower: Math.exp(mean - critical * scale),
-      upper: Math.exp(mean + critical * scale),
-      mean,
-      scale,
-    }
-  }
+  const accuracyPosterior = fitAccuracyTrajectory(chronological)
+  const speedPosterior = fitSpeedTrajectory(chronological, mode)
 
   const curve = Array.from(
     { length: observed.length + FORECAST_ATTEMPTS },
     (_, index): ChartPoint => {
       const attemptNumber = index + 1
-      const estimate = evaluate(attemptNumber, false)
+      const random = makeRandom(8101 + attemptNumber * 1543 + observed.length * 97)
+      const rates = Array.from({ length: 1800 }, () =>
+        sampleLatentRate(attemptNumber, accuracyPosterior, speedPosterior, random, false).rate,
+      ).sort((a, b) => a - b)
       return {
         attempt: attemptNumber,
-        median: estimate.median,
-        lower: estimate.lower,
-        upper: estimate.upper,
+        median: quantile(rates, 0.5),
+        lower: quantile(rates, 0.1),
+        upper: quantile(rates, 0.9),
         forecast: attemptNumber > observed.length,
       }
     },
   )
 
-  const nextEstimate = evaluate(observed.length + 1, true)
-
-  // Posterior predictive simulation combines uncertainty in next-attempt
-  // fluency with the Beta-Binomial estimate of next-attempt accuracy.
-  const totalCorrect = chronological.reduce((sum, attempt) => sum + attempt.correct_answers, 0)
-  const totalQuestions = chronological.reduce((sum, attempt) => sum + attempt.total_questions, 0)
-  const alphaAccuracy = 0.5 + totalCorrect
-  const betaAccuracy = 0.5 + Math.max(0, totalQuestions - totalCorrect)
   const nextQuestionCount = Math.max(1, chronological[chronological.length - 1].total_questions)
   const random = makeRandom(104729 + observed.length * 7919 + Math.round(aim * 100))
   const simulations = 4000
@@ -224,15 +338,19 @@ function fitBayesianLearningCurve(attempts: QuizAttempt[], aim: number): Bayesia
   let masteryCount = 0
 
   for (let simulation = 0; simulation < simulations; simulation += 1) {
-    const chiSquared = 2 * sampleGamma(degreesOfFreedom / 2, random)
-    const studentT = sampleNormal(random) / Math.sqrt(chiSquared / degreesOfFreedom)
-    const rate = Math.exp(nextEstimate.mean + nextEstimate.scale * studentT)
-    const accuracyProbability = sampleBeta(alphaAccuracy, betaAccuracy, random)
+    const draw = sampleLatentRate(
+      observed.length + 1,
+      accuracyPosterior,
+      speedPosterior,
+      random,
+      true,
+    )
     let correct = 0
     for (let item = 0; item < nextQuestionCount; item += 1) {
-      if (random() < accuracyProbability) correct += 1
+      if (random() < draw.probability) correct += 1
     }
     const nextAccuracy = (correct / nextQuestionCount) * 100
+    const rate = (60 * (correct / nextQuestionCount)) / draw.secondsPerItem
     if (rate >= aim && nextAccuracy >= ACCURACY_AIM) masteryCount += 1
     nextRates.push(rate)
   }
@@ -247,7 +365,8 @@ function fitBayesianLearningCurve(attempts: QuizAttempt[], aim: number): Bayesia
       lower: quantile(nextRates, 0.1),
       upper: quantile(nextRates, 0.9),
     },
-    masteryProbability: masteryCount / simulations,
+    masteryProbability: observed.length >= 3 ? masteryCount / simulations : null,
+    ceiling: speedPosterior.ceiling,
     status: observed.length < 3 ? 'early' : observed.length < 6 ? 'developing' : 'established',
   }
 }
@@ -461,8 +580,8 @@ export default function ProgressPage() {
   const selectedMode: ResponseMode = selectedMeta?.mode ?? 'options'
   const fluencyAim = FLUENCY_AIMS[selectedMode]
   const model = useMemo(
-    () => fitBayesianLearningCurve(selectedAttempts, fluencyAim),
-    [selectedAttempts, fluencyAim],
+    () => fitBayesianLearningCurve(selectedAttempts, fluencyAim, selectedMode),
+    [selectedAttempts, fluencyAim, selectedMode],
   )
   const celeration = useMemo(() => calculateCeleration(selectedAttempts), [selectedAttempts])
   const chronological = useMemo(
@@ -539,10 +658,13 @@ export default function ProgressPage() {
                 <strong>{model.next.median.toFixed(1)}<small>/min</small></strong>
                 <p>80% interval {model.next.lower.toFixed(1)}–{model.next.upper.toFixed(1)}</p>
               </div>
-              <div className={model.masteryProbability >= 0.7 ? 'is-positive' : ''}>
+              <div className={model.masteryProbability !== null && model.masteryProbability >= 0.7 ? 'is-positive' : ''}>
                 <span>Combined aim next time</span>
-                <strong>{Math.round(model.masteryProbability * 100)}<small>%</small></strong>
-                <p>≥{ACCURACY_AIM}% and ≥{fluencyAim}/min</p>
+                {model.masteryProbability === null ? (
+                  <><strong>—</strong><p>Available after 3 timings</p></>
+                ) : (
+                  <><strong>{Math.round(model.masteryProbability * 100)}<small>%</small></strong><p>≥{ACCURACY_AIM}% and ≥{fluencyAim}/min</p></>
+                )}
               </div>
               <div>
                 <span>Best observed</span>
@@ -575,7 +697,7 @@ export default function ProgressPage() {
               {model.status === 'early' && (
                 <div className="bl-early-notice">
                   <strong>Early estimate</strong>
-                  <span>The prior keeps the curve conservative while data are sparse. After three timings, the estimate becomes substantially more learner-specific.</span>
+                  <span>The curve is deliberately conservative while data are sparse. The combined next-attempt probability appears after three timings.</span>
                 </div>
               )}
             </section>
@@ -628,13 +750,18 @@ export default function ProgressPage() {
                 <div className="bl-technical-content">
                   <div>
                     <span>Bayesian model</span>
-                    <strong>Power-law learning curve</strong>
-                    <p>Log correct/min is regressed on log attempt number using a regularising Normal–Inverse-Gamma prior. The shaded region is an 80% credible interval for the underlying trajectory.</p>
+                    <strong>Accuracy and speed modelled separately</strong>
+                    <p>Accuracy uses a regularised Bayesian logistic learning curve. Seconds per item use a Bayesian log-time curve. Both learning slopes are centred at zero, so improvement is not assumed in advance.</p>
                   </div>
                   <div>
                     <span>Forecast</span>
                     <strong>Next three attempts</strong>
-                    <p>The forecast concerns subsequent practice attempts, not performance on a particular future date. The next-attempt range is wider because it includes session-to-session variation.</p>
+                    <p>Correct/min is derived jointly from simulated accuracy and response speed. The forecast concerns subsequent attempts, not performance on a particular future date.</p>
+                  </div>
+                  <div>
+                    <span>Task ceiling</span>
+                    <strong>Guardrail {model.ceiling}/min</strong>
+                    <p>The response-time model approaches a task-level ceiling rather than increasing indefinitely. This is a provisional mode-specific guardrail, not a claim about the learner’s personal maximum.</p>
                   </div>
                   <div>
                     <span>Calendar celeration</span>
