@@ -186,11 +186,7 @@ function CategoryPageContent() {
     indigo: 'from-indigo-500 to-indigo-600',
   }
 
-  // Group quizzes → 3 columns
-  const mcqQuizzes = useMemo(
-    () => quizzes.filter(q => (q.quiz_mode ?? 'mcq') === 'mcq'),
-    [quizzes]
-  )
+  // Group fluency quizzes into options and typed columns
   const bankedOptions = useMemo(
     () => quizzes.filter(q => q.quiz_mode === 'banked' && (q.response_mode ?? 'options') === 'options'),
     [quizzes]
@@ -409,7 +405,7 @@ function CategoryPageContent() {
         </div>
       )}
 
-      {/* Quizzes: three columns */}
+      {/* Fluency quizzes: two columns */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
@@ -433,7 +429,7 @@ function CategoryPageContent() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* column renderer */}
             {(() => {
               const Column = ({ title, chipClass, items }: { title: string; chipClass: string; items: Quiz[] }) => (
@@ -456,7 +452,6 @@ function CategoryPageContent() {
 
               return (
                 <>
-                  <Column title="Questions (MCQ)" chipClass="bg-blue-50 text-blue-700" items={mcqQuizzes} />
                   <Column title="Fluency Terms (Options)" chipClass="bg-emerald-50 text-emerald-700" items={bankedOptions} />
                   <Column title="Fluency Terms (Typed)" chipClass="bg-purple-50 text-purple-700" items={bankedTyped} />
                 </>
