@@ -413,14 +413,21 @@ a:focus-visible {
   content: "■ ";
 }
 
+.bl-features,
 .bl-method,
 .bl-modules,
 .bl-credibility {
   padding: clamp(76px, 9vw, 120px) 0;
 }
 
-.bl-method {
+.bl-features {
   background: var(--bl-lcd-light);
+  border-bottom: 1px solid var(--bl-line);
+}
+
+.bl-method {
+  background: #eef1df;
+  border-top: 1px solid var(--bl-line);
   border-bottom: 1px solid var(--bl-line);
 }
 
@@ -446,6 +453,67 @@ a:focus-visible {
   margin: 0;
   color: var(--bl-ink-soft);
   line-height: 1.65;
+}
+
+.bl-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.bl-feature-card {
+  min-height: 390px;
+  padding: 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: rgba(251, 252, 245, 0.88);
+  border: 1px solid var(--bl-ink);
+  border-top: 5px solid var(--bl-forest);
+  box-shadow: 5px 5px 0 rgba(33, 74, 54, 0.15);
+}
+
+.bl-feature-code {
+  color: var(--bl-forest);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+}
+
+.bl-feature-card h3 {
+  margin: 58px 0 18px;
+  font-size: clamp(1.4rem, 2.15vw, 1.9rem);
+  font-weight: 670;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
+.bl-feature-card > p {
+  margin: 0;
+  color: var(--bl-ink-soft);
+  line-height: 1.65;
+}
+
+.bl-feature-tags {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 26px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.bl-feature-tags span {
+  padding: 5px 7px;
+  color: var(--bl-forest-deep);
+  background: var(--bl-lcd);
+  border: 1px solid var(--bl-line);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
 }
 
 .bl-method-grid {
@@ -804,9 +872,14 @@ a:focus-visible {
     gap: 20px;
   }
 
+  .bl-feature-grid,
   .bl-method-grid,
   .bl-practice-grid {
     grid-template-columns: 1fr;
+  }
+
+  .bl-feature-card {
+    min-height: 320px;
   }
 
   .bl-method-card,

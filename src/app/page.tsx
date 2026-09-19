@@ -248,16 +248,31 @@ export default function LandingPage() {
               </div>
             </section>
 
-            <section className="bl-method">
+            <section className="bl-features">
               <div className="bl-container">
                 <div className="bl-section-heading">
-                  <div><p className="bl-kicker">A better practice loop</p><h2>Designed around how fluency develops.</h2></div>
-                  <p>Move beyond recognition. Build fast, accurate responding through focused, measurable practice.</p>
+                  <div><p className="bl-kicker">What makes it different</p><h2>A learning system, not just a term bank.</h2></div>
+                  <p>BehaviorLingo combines measurement, fluency-building and designed contingencies in one practice environment.</p>
                 </div>
-                <div className="bl-method-grid">
-                  <article className="bl-method-card"><span className="bl-card-number">01</span><h3>Learn with support</h3><p>Begin with response options that make accurate discrimination possible from the first session.</p></article>
-                  <article className="bl-method-card"><span className="bl-card-number">02</span><h3>Retrieve independently</h3><p>Move to typed responding when the terms are familiar and active recall matters most.</p></article>
-                  <article className="bl-method-card"><span className="bl-card-number">03</span><h3>Track real fluency</h3><p>See accuracy and correct responses per minute—not a vague score that hides performance.</p></article>
+                <div className="bl-feature-grid">
+                  <article className="bl-feature-card">
+                    <span className="bl-feature-code">01 / PERFORMANCE</span>
+                    <h3>See the learning curve.</h3>
+                    <p>Accuracy, response rate and celeration are graphed across attempts. Predictive modelling helps estimate where performance is heading—not simply where it has been.</p>
+                    <div className="bl-feature-tags"><span>Graphs</span><span>Trends</span><span>Projections</span></div>
+                  </article>
+                  <article className="bl-feature-card">
+                    <span className="bl-feature-code">02 / FLUENCY</span>
+                    <h3>Practise beyond correct.</h3>
+                    <p>Learning continues beyond the first accurate response. Repeated retrieval and overlearning build responding that is faster, more stable and more resistant to forgetting.</p>
+                    <div className="bl-feature-tags"><span>Accuracy</span><span>Rate</span><span>Retention</span></div>
+                  </article>
+                  <article className="bl-feature-card">
+                    <span className="bl-feature-code">03 / CONTINGENCIES</span>
+                    <h3>Make progress consequential.</h3>
+                    <p>Leaderboards and within-session task changes support sustained practice. As a timing advances, higher-effort demands are progressively removed, arranging task relief as a negative-reinforcement contingency.</p>
+                    <div className="bl-feature-tags"><span>Leaderboard</span><span>Task shaping</span><span>Reinforcement</span></div>
+                  </article>
                 </div>
               </div>
             </section>
@@ -312,6 +327,22 @@ export default function LandingPage() {
                   })}
                 </div>
               )}
+            </div>
+          </section>
+        )}
+
+        {!showMyQuizzes && (
+          <section className="bl-method">
+            <div className="bl-container">
+              <div className="bl-section-heading">
+                <div><p className="bl-kicker">The practice sequence</p><h2>Support accuracy. Then build speed.</h2></div>
+                <p>Each mode has a clear job: establish accurate discriminations, strengthen independent retrieval and make change visible across attempts.</p>
+              </div>
+              <div className="bl-method-grid">
+                <article className="bl-method-card"><span className="bl-card-number">01</span><h3>Begin with options</h3><p>Supported responding helps establish accurate term–definition relations without turning early errors into practice.</p></article>
+                <article className="bl-method-card"><span className="bl-card-number">02</span><h3>Move to typed recall</h3><p>Independent retrieval increases response effort and tests whether the vocabulary is genuinely available.</p></article>
+                <article className="bl-method-card"><span className="bl-card-number">03</span><h3>Repeat to fluency</h3><p>Timed practice and performance graphs show whether accurate responding is becoming rapid and durable.</p></article>
+              </div>
             </div>
           </section>
         )}
