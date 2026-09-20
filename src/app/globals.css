@@ -2119,6 +2119,15 @@ a:focus-visible {
   stroke-linejoin: round;
 }
 
+.bl-observed-path {
+  fill: none;
+  stroke: #8b7355;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.82;
+}
+
 .bl-model-forecast {
   stroke: var(--bl-forest);
   stroke-dasharray: 9 7;
@@ -2195,6 +2204,11 @@ a:focus-visible {
 .bl-key-curve {
   height: 3px !important;
   background: var(--bl-forest-deep);
+}
+
+.bl-key-observed {
+  height: 2px !important;
+  background: #8b7355;
 }
 
 .bl-key-band {

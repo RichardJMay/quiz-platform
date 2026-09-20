@@ -165,10 +165,11 @@ const sampleBivariateNormal = (
 }
 
 function fitAccuracyTrajectory(attempts: QuizAttempt[]): LogisticPosterior {
-  // Weakly informative priors: accuracy starts broadly around 75%, while the
-  // learning slope is centred at zero rather than assuming improvement.
-  const priorMean: Vector2 = [Math.log(0.75 / 0.25), 0]
-  const priorPrecision: Vector2 = [1 / 2.25, 1 / 0.64]
+  // Weakly informative priors: accuracy starts broadly around 70%, while the
+  // per-attempt learning slope is centred at zero rather than assuming growth.
+  // The broad priors allow a short run of real observations to dominate.
+  const priorMean: Vector2 = [Math.log(0.70 / 0.30), 0]
+  const priorPrecision: Vector2 = [1 / 4, 1 / 0.64]
   let estimate: Vector2 = [...priorMean]
 
   for (let iteration = 0; iteration < 18; iteration += 1) {
@@ -179,7 +180,7 @@ function fitAccuracyTrajectory(attempts: QuizAttempt[]): LogisticPosterior {
     let gradient1 = priorPrecision[1] * (priorMean[1] - estimate[1])
 
     attempts.forEach((attempt, index) => {
-      const x = Math.log(index + 1)
+      const x = index
       const total = Math.max(1, attempt.total_questions)
       const probability = logistic(estimate[0] + estimate[1] * x)
       const weight = Math.max(1e-6, total * probability * (1 - probability))
@@ -202,7 +203,7 @@ function fitAccuracyTrajectory(attempts: QuizAttempt[]): LogisticPosterior {
   let precision01 = 0
   let precision11 = priorPrecision[1]
   attempts.forEach((attempt, index) => {
-    const x = Math.log(index + 1)
+    const x = index
     const probability = logistic(estimate[0] + estimate[1] * x)
     const weight = Math.max(1e-6, attempt.total_questions * probability * (1 - probability))
     precision00 += weight
@@ -227,12 +228,14 @@ function fitSpeedTrajectory(attempts: QuizAttempt[], mode: ResponseMode): SpeedP
   const observedGuard = Math.max(...potentialRates, 0) * 1.15
   const ceiling = Math.ceil(Math.max(BASE_RATE_CEILINGS[mode], observedGuard) / 5) * 5
   const floorSeconds = 60 / ceiling
-  const typicalSeconds = mode === 'typed' ? 6 : 4
+  // Conservative starting anchors keep the model from manufacturing high
+  // initial fluency before the learner has supplied enough timings.
+  const typicalSeconds = mode === 'typed' ? 12 : 8
 
   // Model the log time above a mechanical response-time floor. This keeps
   // predicted correct/min below a transparent, mode-specific task ceiling.
   const priorMean: Vector2 = [Math.log(Math.max(0.25, typicalSeconds - floorSeconds)), 0]
-  const priorPrecision: Vector2 = [1 / 2.25, 1 / 0.49]
+  const priorPrecision: Vector2 = [1 / 4, 1 / 0.64]
   const priorShape = 2.5
   const priorScale = 0.45
   let xx00 = priorPrecision[0]
@@ -243,7 +246,7 @@ function fitSpeedTrajectory(attempts: QuizAttempt[], mode: ResponseMode): SpeedP
   let ySquared = 0
 
   attempts.forEach((attempt, index) => {
-    const x = Math.log(index + 1)
+    const x = index
     const secondsPerItem = Math.max(
       floorSeconds + 0.01,
       (attempt.total_time_minutes * 60) / Math.max(1, attempt.total_questions),
@@ -283,7 +286,10 @@ function sampleLatentRate(
   random: () => number,
   includeSessionVariation: boolean,
 ) {
-  const x = Math.log(attemptNumber)
+  // A linear attempt index here produces a saturating learning curve because
+  // accuracy is logistic and response time approaches (but cannot cross) the
+  // task floor. It is more responsive than log(attempt) during early practice.
+  const x = attemptNumber - 1
   const accuracyDraw = sampleBivariateNormal(accuracy.mean, accuracy.covariance, random)
   const probability = logistic(accuracyDraw[0] + accuracyDraw[1] * x)
   const variance = speed.scale / sampleGamma(speed.shape, random)
@@ -423,6 +429,7 @@ function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }
   ].join(' ')
   const fittedPath = fitted.map(point => `${xAt(point.attempt)},${yAt(point.median)}`).join(' ')
   const forecastPath = forecast.map(point => `${xAt(point.attempt)},${yAt(point.median)}`).join(' ')
+  const observedPath = model.observed.map(point => `${xAt(point.attempt)},${yAt(point.rate)}`).join(' ')
   const yTicks = Array.from({ length: 6 }, (_, index) => (yMaximum / 5) * index)
   const forecastBoundary = model.observed.length < finalAttempt
     ? (xAt(model.observed.length) + xAt(model.observed.length + 1)) / 2
@@ -469,6 +476,7 @@ function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }
           </>
         )}
 
+        {model.observed.length > 1 && <polyline points={observedPath} className="bl-observed-path" />}
         {fittedPath && <polyline points={fittedPath} className="bl-model-line" />}
         {forecastPath && <polyline points={forecastPath} className="bl-model-line bl-model-forecast" />}
 
@@ -689,6 +697,7 @@ export default function ProgressPage() {
 
               <div className="bl-chart-key">
                 <span><i className="bl-key-point" />Observed timing</span>
+                <span><i className="bl-key-observed" />Observed path</span>
                 <span><i className="bl-key-curve" />Estimated trajectory</span>
                 <span><i className="bl-key-band" />80% credible band</span>
                 <span><i className="bl-key-dash" />Forecast</span>
