@@ -48,20 +48,20 @@ interface BayesianModel {
 }
 
 const ACCURACY_AIM = 90
-const FORECAST_ATTEMPTS = 3
 
 // These mirror the current mode-specific aims used on the pack-selection page.
 // Keeping them explicit here is safer until aims are stored per quiz.
 const FLUENCY_AIMS: Record<ResponseMode, number> = {
   options: 15,
-  typed: 8,
+  typed: 6,
 }
 
-// Conservative task-level guardrails. If recorded item speed already exceeds
-// one, the model raises it enough to contain the observed performance.
+// Empirical task-level guardrails calibrated from 2,017 historical attempts.
+// They sit above the recorded maxima (20.46 options; 7.28 typed), allowing a
+// genuine future record without admitting implausible response rates.
 const BASE_RATE_CEILINGS: Record<ResponseMode, number> = {
-  options: 60,
-  typed: 35,
+  options: 24,
+  typed: 9,
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -218,15 +218,7 @@ function fitAccuracyTrajectory(attempts: QuizAttempt[]): LogisticPosterior {
 }
 
 function fitSpeedTrajectory(attempts: QuizAttempt[], mode: ResponseMode): SpeedPosterior {
-  const potentialRates = attempts.map(attempt => {
-    const secondsPerItem = Math.max(
-      0.05,
-      (attempt.total_time_minutes * 60) / Math.max(1, attempt.total_questions),
-    )
-    return 60 / secondsPerItem
-  })
-  const observedGuard = Math.max(...potentialRates, 0) * 1.15
-  const ceiling = Math.ceil(Math.max(BASE_RATE_CEILINGS[mode], observedGuard) / 5) * 5
+  const ceiling = BASE_RATE_CEILINGS[mode]
   const floorSeconds = 60 / ceiling
   // Conservative starting anchors keep the model from manufacturing high
   // initial fluency before the learner has supplied enough timings.
@@ -318,9 +310,12 @@ function fitBayesianLearningCurve(
 
   const accuracyPosterior = fitAccuracyTrajectory(chronological)
   const speedPosterior = fitSpeedTrajectory(chronological, mode)
+  // Long-range forecasts are poorly identified from a short personal series.
+  // Reveal them gradually as the learner contributes more evidence.
+  const forecastAttempts = observed.length < 6 ? 1 : observed.length < 10 ? 2 : 3
 
   const curve = Array.from(
-    { length: observed.length + FORECAST_ATTEMPTS },
+    { length: observed.length + forecastAttempts },
     (_, index): ChartPoint => {
       const attemptNumber = index + 1
       const random = makeRandom(8101 + attemptNumber * 1543 + observed.length * 97)

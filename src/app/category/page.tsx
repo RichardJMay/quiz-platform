@@ -193,7 +193,7 @@ function CategoryPageContent() {
     const accuracy = performance?.bestAccuracy ?? null
     const fluency = performance?.bestFluency ?? null
     const mode = quiz.response_mode === 'typed' ? 'Typed' : 'Options'
-    const aim = mode === 'Typed' ? 8 : 15
+    const aim = mode === 'Typed' ? 6 : 15
 
     let state: 'learning' | 'accurate' | 'fluent' = 'learning'
     let stateLabel = accuracy === null ? 'Not yet practised' : 'Building'
@@ -352,7 +352,7 @@ function CategoryPageContent() {
             <p>{category?.description}</p>
             <div className="bl-category-meta">
               <span><i aria-hidden="true" /> Options aim: 15/min</span>
-              <span><i aria-hidden="true" /> Typed aim: 8/min</span>
+              <span><i aria-hidden="true" /> Typed aim: 6/min</span>
               <span><i aria-hidden="true" /> 100% accuracy target</span>
             </div>
           </section>

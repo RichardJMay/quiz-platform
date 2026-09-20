@@ -189,8 +189,8 @@ export default function QuizTakerBanked() {
 
   const currentRate = useMemo(() => getCurrentFluencyRate(), [score, startTime, tick])
 
-  const threshold = 20
-  const maxBarRate = 50
+  const threshold = 15
+  const maxBarRate = 24
   const barPercentage = Math.min(100, (currentRate / maxBarRate) * 100)
   const isAboveThreshold = currentRate >= threshold
 
