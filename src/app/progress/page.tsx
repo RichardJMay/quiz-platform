@@ -29,6 +29,8 @@ interface QuizAttempt {
 interface ChartPoint {
   attempt: number
   median: number
+  lower80: number
+  upper80: number
   forecast: boolean
 }
 
@@ -86,6 +88,8 @@ interface PosteriorBundle {
 const POSTERIOR_BUNDLE = posteriorBundleJson as PosteriorBundle
 
 const ACCURACY_AIM = 90
+const FORECAST_SESSIONS = 10
+const MASTERY_HORIZON = 5
 
 // These mirror the current mode-specific aims used on the pack-selection page.
 // Keeping them explicit here is safer until aims are stored per quiz.
@@ -463,32 +467,6 @@ function estimateLearnerPosterior(history: ModelHistoryRow[]): LearnerPosterior 
   return { effects, activeIndices: active, activeCovariance }
 }
 
-function predictNow(
-  previousAttempts: number,
-  gapDays: number,
-  mode: ResponseMode,
-  quizId: string,
-  learnerEffects: LearnerEffects = [0, 0, 0, 0],
-) {
-  const practice = Math.log1p(previousAttempts) / PRACTICE_SCALE
-
-  const accuracyEta = fixedPredictor(mode, previousAttempts, gapDays, quizId, 'accuracy') +
-    learnerEffects[0] + learnerEffects[1] * practice
-  const accuracy =
-    (1 - logistic(FIXED.accuracy.zeroInflation[mode])) * logistic(accuracyEta)
-
-  const speedLocation = fixedPredictor(mode, previousAttempts, gapDays, quizId, 'speed') +
-    learnerEffects[2] + learnerEffects[3] * practice
-  // brms parameterises skew_normal mu as E[log seconds/item].
-  const secondsPerItem = Math.exp(speedLocation)
-
-  return {
-    accuracy: accuracy * 100,
-    secondsPerItem,
-    rate: (60 * accuracy) / secondsPerItem,
-  }
-}
-
 const hashString = (value: string) => {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {
@@ -694,6 +672,27 @@ function simulateAttempt(
   }
 }
 
+function expectedRateForDraw(
+  draw: PosteriorDraw,
+  learnerEffects: LearnerEffects,
+  quizEffects: [number, number],
+  previousAttempts: number,
+  gapDays: number,
+  mode: ResponseMode,
+) {
+  const practice = featureValues(previousAttempts, gapDays).practice
+  const accuracyEta = drawLinearPredictor(
+    draw, mode, previousAttempts, gapDays, 'correctanswers', quizEffects[0],
+  ) + learnerEffects[0] + learnerEffects[1] * practice
+  const expectedAccuracy =
+    (1 - logistic(fixedDrawValue(draw, `zi_correctanswers_response_mode${mode}`))) *
+    logistic(accuracyEta)
+  const speedMean = drawLinearPredictor(
+    draw, mode, previousAttempts, gapDays, 'logsecondsperitem', quizEffects[1],
+  ) + learnerEffects[2] + learnerEffects[3] * practice
+  return 60 * expectedAccuracy / Math.exp(speedMean)
+}
+
 function simulatePosteriorPredictive({
   previousAttempts,
   gapDays,
@@ -701,6 +700,7 @@ function simulatePosteriorPredictive({
   quizId,
   totalQuestions,
   learnerPosterior,
+  historicalGaps,
   seedKey,
 }: {
   previousAttempts: number
@@ -709,6 +709,7 @@ function simulatePosteriorPredictive({
   quizId: string
   totalQuestions: number
   learnerPosterior: LearnerPosterior
+  historicalGaps: number[]
   seedKey: string
 }) {
   const random = seededRandom(hashString(`${MODEL_VERSION}|${quizId}|${seedKey}`))
@@ -720,6 +721,8 @@ function simulatePosteriorPredictive({
   const fluencyGoal: boolean[] = []
   const jointGoal: boolean[] = []
   const attemptsToSustained: number[] = []
+  const fittedRates = historicalGaps.map(() => [] as number[])
+  const forecastRates = Array.from({ length: FORECAST_SESSIONS }, () => [] as number[])
   const quizIndex = QUIZ_DRAW_INDEX.get(quizId)
 
   POSTERIOR_BUNDLE.draws.forEach(draw => {
@@ -747,9 +750,20 @@ function simulatePosteriorPredictive({
       quizEffects = [draw.quiz_accuracy[quizIndex], draw.quiz_speed[quizIndex]]
     }
 
+    historicalGaps.forEach((historicalGap, index) => {
+      fittedRates[index].push(expectedRateForDraw(
+        draw,
+        learnerEffects,
+        quizEffects,
+        index,
+        historicalGap,
+        mode,
+      ))
+    })
+
     let consecutiveSuccesses = 0
     let sustainedAt: number | null = null
-    for (let futureAttempt = 1; futureAttempt <= 5; futureAttempt += 1) {
+    for (let futureAttempt = 1; futureAttempt <= FORECAST_SESSIONS; futureAttempt += 1) {
       const result = simulateAttempt(
         draw,
         learnerEffects,
@@ -761,12 +775,15 @@ function simulatePosteriorPredictive({
         random,
         normal,
       )
+      forecastRates[futureAttempt - 1].push(result.rate)
       const meetsAccuracy = result.accuracy >= ACCURACY_AIM / 100
       const meetsFluency = result.rate >= FLUENCY_AIMS[mode]
       const meetsJointGoal = meetsAccuracy && meetsFluency
-      consecutiveSuccesses = meetsJointGoal ? consecutiveSuccesses + 1 : 0
-      if (sustainedAt === null && consecutiveSuccesses >= 2) {
-        sustainedAt = futureAttempt
+      if (futureAttempt <= MASTERY_HORIZON) {
+        consecutiveSuccesses = meetsJointGoal ? consecutiveSuccesses + 1 : 0
+        if (sustainedAt === null && consecutiveSuccesses >= 2) {
+          sustainedAt = futureAttempt
+        }
       }
       if (futureAttempt === 1) {
         nextAccuracy.push(result.accuracy * 100)
@@ -782,6 +799,11 @@ function simulatePosteriorPredictive({
 
   const proportionTrue = (values: boolean[]) =>
     values.filter(Boolean).length / Math.max(1, values.length)
+  const interval = (values: number[]) => ({
+    median: quantile(values, 0.5),
+    lower80: quantile(values, 0.1),
+    upper80: quantile(values, 0.9),
+  })
 
   return {
     accuracyMedian: quantile(nextAccuracy, 0.5),
@@ -799,6 +821,8 @@ function simulatePosteriorPredictive({
     medianAttemptsToSustainedMastery: attemptsToSustained.length
       ? quantile(attemptsToSustained, 0.5)
       : null,
+    fittedRateTrajectory: fittedRates.map(interval),
+    forecastRateTrajectory: forecastRates.map(interval),
   }
 }
 
@@ -821,18 +845,11 @@ function fitBayesianLearningCurve(
   }))
   const learnerHistory = prepareLearnerHistory(allLearnerAttempts)
   const learnerPosterior = estimateLearnerPosterior(learnerHistory)
-  const learnerEffects = learnerPosterior.effects
-
-  const curve: ChartPoint[] = chronological.map((attempt, index) => {
+  const historicalGaps = chronological.map((attempt, index) => {
     const previous = index > 0 ? chronological[index - 1] : null
-    const gapDays = previous
+    return previous
       ? daysBetween(new Date(attempt.completed_at), new Date(previous.completed_at))
       : 0
-    return {
-      attempt: index + 1,
-      median: predictNow(index, gapDays, mode, attempt.quiz_id, learnerEffects).rate,
-      forecast: false,
-    }
   })
   const latest = chronological[chronological.length - 1]
   const predictive = simulatePosteriorPredictive({
@@ -842,20 +859,27 @@ function fitBayesianLearningCurve(
     quizId: latest.quiz_id,
     totalQuestions: Math.max(1, Math.round(Number(latest.total_questions))),
     learnerPosterior,
+    historicalGaps,
     seedKey: learnerHistory.map((row, index) =>
       `${index}:${row.quizId}:${row.correctAnswers}:${row.logSecondsPerItem}`).join('|'),
   })
+  const curve: ChartPoint[] = [
+    ...predictive.fittedRateTrajectory.map((point, index) => ({
+      attempt: index + 1,
+      ...point,
+      forecast: false,
+    })),
+    ...predictive.forecastRateTrajectory.map((point, index) => ({
+      attempt: chronological.length + index + 1,
+      ...point,
+      forecast: true,
+    })),
+  ]
   const predictiveNext = {
     accuracy: predictive.accuracyMedian,
     secondsPerItem: predictive.secondsMedian,
     rate: predictive.rateMedian,
   }
-  curve.push({
-    attempt: chronological.length + 1,
-    median: predictive.rateMedian,
-    forecast: true,
-  })
-
   return {
     observed,
     curve,
@@ -906,7 +930,7 @@ function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }
   const yMaximumRaw = Math.max(
     aim * 1.35,
     ...model.observed.map(point => point.rate * 1.15),
-    ...model.curve.map(point => Math.min(point.median * 1.15, aim * 4)),
+    ...model.curve.map(point => point.upper80 * 1.08),
   )
   const yMaximum = Math.max(5, Math.ceil(yMaximumRaw / 5) * 5)
   const xAt = (attempt: number) =>
@@ -914,11 +938,23 @@ function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }
   const yAt = (rate: number) =>
     margin.top + plotHeight - (clamp(rate, 0, yMaximum) / yMaximum) * plotHeight
   const fitted = model.curve.filter(point => !point.forecast)
-  const forecast = model.curve.filter(point => point.attempt >= model.observed.length)
+  const forecast = model.curve.filter(point => point.forecast)
+  const forecastLine = fitted.length ? [fitted[fitted.length - 1], ...forecast] : forecast
   const fittedPath = fitted.map(point => `${xAt(point.attempt)},${yAt(point.median)}`).join(' ')
-  const forecastPath = forecast.map(point => `${xAt(point.attempt)},${yAt(point.median)}`).join(' ')
+  const forecastPath = forecastLine.map(point => `${xAt(point.attempt)},${yAt(point.median)}`).join(' ')
   const observedPath = model.observed.map(point => `${xAt(point.attempt)},${yAt(point.rate)}`).join(' ')
+  const bandPath = (points: ChartPoint[]) => {
+    if (!points.length) return ''
+    const upper = points.map(point => `${xAt(point.attempt)},${yAt(point.upper80)}`)
+    const lower = points.slice().reverse().map(point => `${xAt(point.attempt)},${yAt(point.lower80)}`)
+    return `M ${upper.join(' L ')} L ${lower.join(' L ')} Z`
+  }
+  const fittedBandPath = bandPath(fitted)
+  const forecastBandPath = bandPath(forecast)
   const yTicks = Array.from({ length: 6 }, (_, index) => (yMaximum / 5) * index)
+  const xTickStep = finalAttempt > 16 ? 2 : 1
+  const xTicks = model.curve.filter(point =>
+    point.attempt === 1 || point.attempt === finalAttempt || point.attempt % xTickStep === 0)
   const forecastBoundary = model.observed.length < finalAttempt
     ? (xAt(model.observed.length) + xAt(model.observed.length + 1)) / 2
     : xAt(finalAttempt)
@@ -929,7 +965,7 @@ function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }
         viewBox={`0 0 ${width} ${height}`}
         className="bl-trajectory-chart"
         role="img"
-        aria-label="Provisional Bayesian fluency trajectory with a point forecast for an attempt now"
+        aria-label="Bayesian fluency trajectory with 80 percent credible and posterior-predictive intervals across ten future sessions"
       >
         <defs>
           <pattern id="bl-chart-grid" width="12" height="12" patternUnits="userSpaceOnUse">
@@ -946,12 +982,23 @@ function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }
           </g>
         ))}
 
-        {model.curve.map(point => (
+        {xTicks.map(point => (
           <g key={point.attempt}>
             <line x1={xAt(point.attempt)} y1={margin.top + plotHeight} x2={xAt(point.attempt)} y2={margin.top + plotHeight + 7} stroke="#152219" />
             <text x={xAt(point.attempt)} y={margin.top + plotHeight + 25} textAnchor="middle" className="bl-chart-tick">{point.attempt}</text>
           </g>
         ))}
+
+        {fittedBandPath && (
+          <path d={fittedBandPath} fill="#9aaa83" opacity="0.18">
+            <title>80% credible interval for the fitted expected trajectory</title>
+          </path>
+        )}
+        {forecastBandPath && (
+          <path d={forecastBandPath} fill="#2f6f4e" opacity="0.22">
+            <title>80% posterior-predictive interval for future observed timings</title>
+          </path>
+        )}
 
         <line x1={margin.left} y1={yAt(aim)} x2={width - margin.right} y2={yAt(aim)} className="bl-aim-line" />
         <text x={width - margin.right - 5} y={yAt(aim) - 9} textAnchor="end" className="bl-aim-label">Aim {aim}/min</text>
@@ -959,7 +1006,7 @@ function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }
         {model.observed.length < finalAttempt && (
           <>
             <line x1={forecastBoundary} y1={margin.top} x2={forecastBoundary} y2={margin.top + plotHeight} className="bl-forecast-boundary" />
-            <text x={forecastBoundary + 10} y={margin.top + 18} className="bl-forecast-label">If attempted now</text>
+            <text x={forecastBoundary + 10} y={margin.top + 18} className="bl-forecast-label">10-session forecast</text>
           </>
         )}
 
@@ -1190,8 +1237,8 @@ export default function ProgressPage() {
               </div>
             </section>
             <div className="bl-early-notice">
-              <strong>Five-attempt forecast</strong>
-              <span>Sustained mastery means meeting both aims on two consecutive attempts. The first is attempted now; subsequent attempts are modelled one day apart.</span>
+              <strong>Ten-session forecast</strong>
+              <span>The first session is modelled now and the following nine one day apart. Sustained mastery remains defined as meeting both aims on two consecutive attempts within the first five sessions.</span>
             </div>
 
             <section className="bl-trajectory-panel">
@@ -1212,7 +1259,9 @@ export default function ProgressPage() {
                 <span><i className="bl-key-point" />Observed timing</span>
                 <span><i className="bl-key-observed" />Observed path</span>
                 <span><i className="bl-key-curve" />Personalised model fit</span>
-                <span><i className="bl-key-dash" />If attempted now</span>
+                <span><i style={{ background: '#9aaa83', opacity: 0.35 }} />80% credible band</span>
+                <span><i className="bl-key-dash" />Forecast median</span>
+                <span><i style={{ background: '#2f6f4e', opacity: 0.35 }} />80% predictive band</span>
               </div>
 
               {model.status === 'limited' && (
@@ -1298,8 +1347,8 @@ export default function ProgressPage() {
                   </div>
                   <div>
                     <span>Uncertainty calculation</span>
-                    <strong>{POSTERIOR_BUNDLE.metadata.posterior_draws_exported} posterior-predictive simulations</strong>
-                    <p>Population and quiz parameters use fitted posterior draws. The current learner’s effects use a penalised empirical-Bayes estimate with a local Gaussian approximation to their posterior uncertainty.</p>
+                    <strong>{POSTERIOR_BUNDLE.metadata.posterior_draws_exported} simulations per forecast session</strong>
+                    <p>The historical band is an 80% credible interval for expected performance. The future band is an 80% posterior-predictive interval for actual timings, including attempt-to-attempt variation. Population and quiz parameters use fitted posterior draws; learner effects use a penalised empirical-Bayes estimate with a local Gaussian approximation.</p>
                   </div>
                   <div>
                     <span>Deployment status</span>
