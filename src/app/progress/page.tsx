@@ -6,14 +6,10 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import stateSpaceBundleJson from './behaviorlingo_state_space_posterior_bundle_v3.json'
-import { BehaviorLingoMasteryCard } from './BehaviorLingoMasteryCard'
 import {
-  forecastCapabilityTrajectory,
-  forecastMastery,
   forecastNextAttempt,
   forecastNextAttemptFluencySamples,
   type AttemptObservation,
-  type CapabilityTrajectoryForecast,
   type NextAttemptForecast,
   type StateSpacePosteriorBundleV3,
 } from './behaviorlingo-state-space-v3'
@@ -142,7 +138,6 @@ function FluencyTrajectory({
   const pointY = yAt(forecast.correctPerMinute.point)
   const lowerY = yAt(forecast.correctPerMinute.lower80)
   const upperY = yAt(forecast.correctPerMinute.upper80)
-  const lastObserved = observed[observed.length - 1]
   const densityValues = fluencySamples.filter(Number.isFinite).sort((a, b) => a - b)
   const densityLower = densityValues[Math.floor(0.005 * (densityValues.length - 1))] ?? 0
   const densityUpper = densityValues[Math.ceil(0.995 * (densityValues.length - 1))] ?? yMaximum
@@ -199,8 +194,6 @@ function FluencyTrajectory({
         <text x={width - margin.right - 5} y={yAt(aim) - 9} textAnchor="end"
           className="bl-aim-label">Aim {aim}/min</text>
         {observed.length > 1 && <polyline points={observedPath} className="bl-observed-path" />}
-        {lastObserved && <line x1={xAt(lastObserved.attempt)} y1={yAt(lastObserved.rate)}
-          x2={predictionX} y2={pointY} className="bl-model-line bl-model-forecast" />}
         <path d={halfEyePath} fill="#2f6f4e" opacity="0.32" stroke="#2f6f4e" strokeWidth="1.5">
           <title>Posterior predictive density if attempted now</title>
         </path>
@@ -227,84 +220,9 @@ function FluencyTrajectory({
   )
 }
 
-function TenDayTrajectory({
-  trajectory,
-  aim,
-}: {
-  trajectory: CapabilityTrajectoryForecast
-  aim: number
-}) {
-  const width = 920
-  const height = 430
-  const margin = { top: 28, right: 34, bottom: 58, left: 76 }
-  const plotWidth = width - margin.left - margin.right
-  const plotHeight = height - margin.top - margin.bottom
-  const yMaximumRaw = Math.max(
-    aim * 1.35,
-    ...trajectory.points.map(point => point.upper80CorrectPerMinute * 1.08),
-  )
-  const yMaximum = Math.max(5, Math.ceil(yMaximumRaw / 5) * 5)
-  const xAt = (day: number) => margin.left + day / trajectory.horizonDays * plotWidth
-  const yAt = (rate: number) => margin.top + plotHeight -
-    clamp(rate, 0, yMaximum) / yMaximum * plotHeight
-  const medianPath = trajectory.points.map(point =>
-    `${xAt(point.day)},${yAt(point.medianCorrectPerMinute)}`).join(' ')
-  const upper = trajectory.points.map(point =>
-    `${xAt(point.day)},${yAt(point.upper80CorrectPerMinute)}`)
-  const lower = trajectory.points.slice().reverse().map(point =>
-    `${xAt(point.day)},${yAt(point.lower80CorrectPerMinute)}`)
-  const bandPath = `M ${upper.join(' L ')} L ${lower.join(' L ')} Z`
-  const yTicks = Array.from({ length: 6 }, (_, index) => yMaximum / 5 * index)
-
-  return <div className="bl-trajectory-scroll">
-    <svg viewBox={`0 0 ${width} ${height}`} className="bl-trajectory-chart"
-      role="img" aria-label={`Ten-day latent capability forecast with ${trajectory.sessionsPerDay} sessions per day`}>
-      <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight}
-        fill="none" stroke="#152219" />
-      {yTicks.map(tick => <g key={tick}>
-        <line x1={margin.left} y1={yAt(tick)} x2={width - margin.right} y2={yAt(tick)}
-          stroke="#9aaa83" strokeWidth="0.7" opacity="0.5" />
-        <text x={margin.left - 14} y={yAt(tick) + 4} textAnchor="end"
-          className="bl-chart-tick">{tick.toFixed(0)}</text>
-      </g>)}
-      {trajectory.points.map(point => <g key={point.day}>
-        <line x1={xAt(point.day)} y1={margin.top + plotHeight}
-          x2={xAt(point.day)} y2={margin.top + plotHeight + 7} stroke="#152219" />
-        <text x={xAt(point.day)} y={margin.top + plotHeight + 24} textAnchor="middle"
-          className="bl-chart-tick">{point.day}</text>
-      </g>)}
-      <path d={bandPath} fill="#2f6f4e" opacity="0.2">
-        <title>80% interval for latent modelled capability</title>
-      </path>
-      <polyline points={medianPath} fill="none" stroke="#2f6f4e" strokeWidth="4" />
-      <line x1={margin.left} y1={yAt(aim)} x2={width - margin.right} y2={yAt(aim)}
-        className="bl-aim-line" />
-      <text x={width - margin.right - 5} y={yAt(aim) - 9} textAnchor="end"
-        className="bl-aim-label">Aim {aim}/min</text>
-      <text x={margin.left + plotWidth / 2} y={height - 12} textAnchor="middle"
-        className="bl-chart-axis">Days from now</text>
-      <text x="19" y={margin.top + plotHeight / 2} textAnchor="middle"
-        transform={`rotate(-90 19 ${margin.top + plotHeight / 2})`}
-        className="bl-chart-axis">Modelled capability · correct/min</text>
-    </svg>
-  </div>
-}
-
-function AccuracyStrip({ observed }: { observed: ObservedPoint[] }) {
-  return <div className="bl-accuracy-strip" aria-label="Accuracy by attempt">
-    {observed.map(point => <div key={point.attempt}
-      className={point.accuracy >= ACCURACY_AIM ? 'is-accurate' : 'is-building'}>
-      <span>A{String(point.attempt).padStart(2, '0')}</span>
-      <strong>{point.accuracy.toFixed(0)}%</strong>
-      <small>{formatDate(point.date)}</small>
-    </div>)}
-  </div>
-}
-
 export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([])
   const [selectedQuiz, setSelectedQuiz] = useState('')
-  const [sessionsPerDay, setSessionsPerDay] = useState<1 | 2 | 3>(1)
   const [loading, setLoading] = useState(true)
   const [showTechnical, setShowTechnical] = useState(false)
   const loadingRef = useRef(false)
@@ -366,8 +284,6 @@ export default function ProgressPage() {
     ? Math.max(1, Math.round(Number(latest.total_questions))) : 36
   const elapsedDaysSinceLatest = latest
     ? daysBetween(new Date(), new Date(latest.completed_at)) : 0
-  const practiceEveryDays = 1 / sessionsPerDay
-  const firstSessionGapDays = elapsedDaysSinceLatest + practiceEveryDays
   const nextForecast = useMemo(() => forecastNextAttempt(STATE_SPACE_BUNDLE, {
     mode: selectedMode, history, nextGapDays: elapsedDaysSinceLatest, plannedItems,
   }), [selectedMode, history, elapsedDaysSinceLatest, plannedItems])
@@ -375,27 +291,6 @@ export default function ProgressPage() {
     STATE_SPACE_BUNDLE,
     { mode: selectedMode, history, nextGapDays: elapsedDaysSinceLatest, plannedItems },
   ), [selectedMode, history, elapsedDaysSinceLatest, plannedItems])
-  const masteryForecast = useMemo(() => forecastMastery(STATE_SPACE_BUNDLE, {
-    mode: selectedMode,
-    history,
-    plannedItems,
-    practiceEveryDays,
-    firstSessionGapDays,
-    horizonSessions: 10 * sessionsPerDay,
-    trajectoriesPerDraw: 16,
-    consecutiveGoalSessions: 2,
-  }), [selectedMode, history, plannedItems, practiceEveryDays, firstSessionGapDays, sessionsPerDay])
-  const tenDayTrajectory = useMemo(() => forecastCapabilityTrajectory(
-    STATE_SPACE_BUNDLE,
-    {
-      mode: selectedMode,
-      history,
-      sessionsPerDay,
-      elapsedDaysSinceLatest,
-      horizonDays: 10,
-      trajectoriesPerDraw: 16,
-    },
-  ), [selectedMode, history, sessionsPerDay, elapsedDaysSinceLatest])
   const bestRate = observed.length ? Math.max(...observed.map(point => point.rate)) : 0
 
   if (loading) return <div className="bl-page bl-loading min-h-screen">
@@ -419,8 +314,8 @@ export default function ProgressPage() {
     <main className="bl-container bl-progress-main">
       <section className="bl-progress-intro">
         <div><p className="bl-kicker">Performance record</p>
-          <h1>Your progress and mastery forecast.</h1>
-          <p>The model updates from this learner’s own timings and reports uncertainty rather than a fixed progress line.</p>
+          <h1>Your progress and next-attempt estimate.</h1>
+          <p>The graph shows this learner’s recorded timings and the posterior predictive distribution if the same pack were attempted now.</p>
         </div>
         {attempts.length > 0 && <label className="bl-pack-selector">
           <span>Fluency pack</span>
@@ -461,8 +356,6 @@ export default function ProgressPage() {
           </div>
         </section>
 
-        <BehaviorLingoMasteryCard forecast={masteryForecast} />
-
         <section className="bl-trajectory-panel">
           <div className="bl-panel-heading"><div>
             <p className="bl-kicker">Fluency trajectory</p><h2>{selectedMeta?.title}</h2>
@@ -474,49 +367,13 @@ export default function ProgressPage() {
           <div className="bl-chart-key">
             <span><i className="bl-key-point" />Observed timing</span>
             <span><i className="bl-key-observed" />Observed path</span>
-            <span><i className="bl-key-dash" />If attempted now</span>
+            <span><i className="bl-key-point" style={{ background: '#152219' }} />Median if attempted now</span>
             <span><i style={{ background: '#2f6f4e', opacity: 0.35 }} />Posterior predictive density</span>
           </div>
           {history.length < 2 && <div className="bl-early-notice">
             <strong>Limited history</strong>
-            <span>Complete at least two timings on this pack before interpreting sessions to mastery. Until then, the population prior contributes most of the information.</span>
+            <span>Complete at least two timings on this pack before interpreting the personalised next-attempt estimate. Until then, the population prior contributes most of the information.</span>
           </div>}
-        </section>
-
-        <section className="bl-trajectory-panel">
-          <div className="bl-panel-heading"><div>
-            <p className="bl-kicker">Ten-day projection</p>
-            <h2>Likely trajectory under planned practice</h2>
-          </div><div className="flex items-center gap-3" aria-label="Sessions per day">
-            <button type="button" className="rounded border border-slate-400 px-3 py-2"
-              disabled={sessionsPerDay === 1}
-              onClick={() => setSessionsPerDay(value => Math.max(1, value - 1) as 1 | 2 | 3)}
-              aria-label="Decrease sessions per day">−</button>
-            <strong className="min-w-24 text-center tabular-nums">
-              {sessionsPerDay} session{sessionsPerDay === 1 ? '' : 's'}/day
-            </strong>
-            <button type="button" className="rounded border border-slate-400 px-3 py-2"
-              disabled={sessionsPerDay === 3}
-              onClick={() => setSessionsPerDay(value => Math.min(3, value + 1) as 1 | 2 | 3)}
-              aria-label="Increase sessions per day">+</button>
-          </div></div>
-          <TenDayTrajectory trajectory={tenDayTrajectory} aim={fluencyAim} />
-          <div className="bl-chart-key">
-            <span><i className="bl-key-curve" />Median modelled capability</span>
-            <span><i style={{ background: '#2f6f4e', opacity: 0.35 }} />80% uncertainty band</span>
-          </div>
-          <div className="bl-early-notice">
-            <strong>Conditional projection</strong>
-            <span>This shows the likely latent trajectory if the learner completes {sessionsPerDay} session{sessionsPerDay === 1 ? '' : 's'} per day. It is a forecast under that schedule, not proof that increasing frequency causes the projected improvement.</span>
-          </div>
-        </section>
-
-        <section className="bl-accuracy-panel">
-          <div className="bl-panel-heading bl-panel-heading-compact"><div>
-            <p className="bl-kicker">Accuracy check</p><h2>Accuracy across attempts</h2>
-          </div><span className="bl-accuracy-aim">Aim ≥{ACCURACY_AIM}%</span></div>
-          <AccuracyStrip observed={observed} />
-          <p className="bl-accuracy-note">Green timings meet the accuracy criterion. Mastery requires both accuracy and the mode-specific fluency aim.</p>
         </section>
 
         <section className="bl-history-panel">
@@ -558,18 +415,15 @@ export default function ProgressPage() {
               <strong>{history.length} eligible timing{history.length === 1 ? '' : 's'} on this pack</strong>
               <p>Each timing updates the learner’s filtered latent state. New learners begin at the fitted population distribution.</p>
             </div>
-            <div><span>Mastery definition</span><strong>Both aims in two consecutive sessions</strong>
-              <p>Accuracy ≥{ACCURACY_AIM}% and fluency ≥{fluencyAim}/min must occur twice consecutively. First passage is simulated across ten future sessions.</p>
-            </div>
             <div><span>Uncertainty</span>
-              <strong>{masteryForecast.simulatedTrajectories} predictive trajectories</strong>
-              <p>The calculation propagates uncertainty in the learner state, fitted population parameters, future learning, accuracy and speed.</p>
+              <strong>{nextFluencySamples.length} posterior predictive draws</strong>
+              <p>The half-eye shows where next-attempt outcomes are most plausible; the dot is the median and the vertical line is the central 80% interval.</p>
             </div>
             <div><span>Numerical validation</span><strong>R and TypeScript matched</strong>
               <p>All five golden scenarios matched the offline R reference within 1e-7 tolerance.</p>
             </div>
-            <div><span>Interpretation</span><strong>Forecast, not a guarantee</strong>
-              <p>Results assume the selected practice schedule. Typed-mode estimates remain tentative because the historical typed sample is small.</p>
+            <div><span>Interpretation</span><strong>Estimate if attempted now, not a guarantee</strong>
+              <p>No multi-session trajectory is extrapolated. Typed-mode estimates remain tentative because the historical typed sample is small.</p>
             </div>
           </div>}
         </section>
