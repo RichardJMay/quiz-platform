@@ -5,7 +5,15 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
-import posteriorBundleJson from './app_posterior_draw_bundle_v1_3.json'
+import stateSpaceBundleJson from './behaviorlingo_state_space_posterior_bundle_v3.json'
+import { BehaviorLingoMasteryCard } from './BehaviorLingoMasteryCard'
+import {
+  forecastMastery,
+  forecastNextAttempt,
+  type AttemptObservation,
+  type NextAttemptForecast,
+  type StateSpacePosteriorBundleV3,
+} from './behaviorlingo-state-space-v3'
 
 type ResponseMode = 'options' | 'typed'
 
@@ -26,1030 +34,184 @@ interface QuizAttempt {
   } | null
 }
 
-interface ChartPoint {
+interface ObservedPoint {
   attempt: number
-  median: number
-  lower80: number
-  upper80: number
-  forecast: boolean
+  rate: number
+  accuracy: number
+  date: string
 }
 
-interface BayesianModel {
-  observed: Array<{
-    attempt: number
-    rate: number
-    accuracy: number
-    date: string
-  }>
-  curve: ChartPoint[]
-  next: {
-    accuracy: number
-    secondsPerItem: number
-    rate: number
-  }
-  status: 'limited' | 'provisional'
-  quizEffectUsed: boolean
-  historyObservations: number
-  slopesActive: boolean
-  personalised: boolean
-  predictive: {
-    accuracyMedian: number
-    accuracyLower80: number
-    accuracyUpper80: number
-    rateMedian: number
-    rateLower80: number
-    rateUpper80: number
-    secondsMedian: number
-    probabilityAccuracyGoal: number
-    probabilityFluencyGoal: number
-    probabilityJointGoal: number
-    probabilitySustainedMasteryWithinFive: number
-    medianAttemptsToSustainedMastery: number | null
-  }
-}
-
-interface PosteriorDraw {
-  draw_id: number
-  fixed: number[]
-  learner_covariance_lower: number[]
-  quiz_accuracy: number[]
-  quiz_speed: number[]
-}
-
-interface PosteriorBundle {
-  metadata: { model_version: string; posterior_draws_exported: number }
-  fixed_order: Array<{ raw_term: string }>
-  learner_effect_order: string[]
-  learner_covariance_lower_order: number[][]
-  quiz_order: string[]
-  draws: PosteriorDraw[]
-}
-
-const POSTERIOR_BUNDLE = posteriorBundleJson as PosteriorBundle
-
+const STATE_SPACE_BUNDLE =
+  stateSpaceBundleJson as unknown as StateSpacePosteriorBundleV3
 const ACCURACY_AIM = 90
-const FORECAST_SESSIONS = 10
-const MASTERY_HORIZON = 5
-
-// These mirror the current mode-specific aims used on the pack-selection page.
-// Keeping them explicit here is safer until aims are stored per quiz.
-const FLUENCY_AIMS: Record<ResponseMode, number> = {
-  options: 15,
-  typed: 6,
-}
-
-// Frozen medians from provisional_model_bundle_v1_2.json.
-// Model: zero-inflated beta-binomial accuracy + skew-normal log seconds/item.
-// Validated export: 1,396 observations, 30 learners and 35 quizzes.
-const MODEL_VERSION = POSTERIOR_BUNDLE.metadata.model_version
-const PRACTICE_SCALE = 1.04211108380758
-const GAP_SCALE = 0.962520538824282
-
-const FIXED = {
-  accuracy: {
-    intercept: 1.012505,
-    typed: -0.6123605,
-    practice: 0.849382,
-    priorAttempt: 0.3528315,
-    gap: -0.186857,
-    typedPractice: -0.007966005,
-    typedPriorAttempt: 0.0762137,
-    typedGap: -0.1475015,
-    logPhi: { options: 2.69911, typed: 2.50705 },
-    zeroInflation: { options: -3.211835, typed: -3.86402 },
-  },
-  speed: {
-    intercept: 2.878825,
-    typed: 0.02245765,
-    practice: -0.276642,
-    priorAttempt: -0.28352,
-    gap: 0.1054705,
-    typedPractice: 0.0827162,
-    typedPriorAttempt: 0.2650775,
-    typedGap: -0.114262,
-    logSigma: { options: -0.730335, typed: -0.9563975 },
-    alpha: { options: 4.509295, typed: 3.660595 },
-  },
-} as const
-
-const LEARNER_COVARIANCE = [
-  [0.8315679941245, -0.171463801632016, -0.0696040053910207, 0.0164844567164129],
-  [-0.171463801632016, 0.2628920529, 0.0253283341801046, -0.0246520893293016],
-  [-0.0696040053910207, 0.0253283341801046, 0.2443804395625, 0.00163217654352951],
-  [0.0164844567164129, -0.0246520893293016, 0.00163217654352951, 0.00828261996946],
-] as const
-
-const QUIZ_COVARIANCE = [
-  [0.1917349535305, -0.0437137877928031],
-  [-0.0437137877928031, 0.016350736901],
-] as const
-
-const FIXED_DRAW_INDEX = new Map(
-  POSTERIOR_BUNDLE.fixed_order.map((parameter, index) => [parameter.raw_term, index]),
-)
-const QUIZ_DRAW_INDEX = new Map(
-  POSTERIOR_BUNDLE.quiz_order.map((quizId, index) => [quizId, index]),
-)
-
-const MINIMUM_HISTORY_FOR_SLOPES = 6
+const FLUENCY_AIMS: Record<ResponseMode, number> = { options: 15, typed: 6 }
 const EXCLUDED_ATTEMPT_IDS = new Set([
-  // Two known corrupt 0/36 records excluded from the fitted model.
   '157f465a-957c-46bf-b523-0b56134d5118',
   '163bbf23-690b-4530-961d-c1d2edb702b2',
 ])
 
-type LearnerEffects = [number, number, number, number]
-
-interface LearnerPosterior {
-  effects: LearnerEffects
-  activeIndices: number[]
-  activeCovariance: number[][]
-}
-
-interface ModelHistoryRow {
-  mode: ResponseMode
-  previousAttempts: number
-  practice: number
-  priorAttempt: number
-  gap: number
-  quizId: string
-  totalQuestions: number
-  correctAnswers: number
-  logSecondsPerItem: number
-}
-
-// Quiz-level posterior medians. Unknown/new quizzes correctly fall back to 0,
-// which is the fitted population-level prediction specified by the bundle.
-const QUIZ_EFFECTS: Record<string, { accuracy: number; speed: number }> = {
-  '0159f04e-e611-4577-8b49-ad8df4dd71d9': { accuracy: -0.3372055, speed: 0.100508 },
-  '05f7830a-ad53-4fbe-9770-dfae712bc78d': { accuracy: 0.4810155, speed: -0.09889925 },
-  '1f1a1ddb-1524-411d-b25d-f1eb8707e39e': { accuracy: -0.512673, speed: 0.2142705 },
-  '244d767c-a471-4fd6-95a5-8e55333bdced': { accuracy: -0.3657575, speed: 0.071687 },
-  '2ed72100-24ed-46d5-9611-49d804b738af': { accuracy: 0.463009, speed: -0.2079065 },
-  '3034f1cf-e0e8-40d9-9322-f6025d278b02': { accuracy: 0.1904255, speed: -0.05512495 },
-  '34318c26-45df-445b-ad7f-88a599ab14ea': { accuracy: -0.154011, speed: -0.01577235 },
-  '4758f35c-3081-4962-a7e4-e009d76f495e': { accuracy: 0.163768, speed: -0.0425258 },
-  '49f8b8be-27f9-43c8-b88e-a6e0b31bd8e2': { accuracy: 0.497971, speed: -0.1673545 },
-  '5fc9de6d-bce8-43cc-b405-6066672e1ac5': { accuracy: -0.07954075, speed: 0.0433932 },
-  '71d57361-473e-466a-9b3a-d4231f853961': { accuracy: -0.158627, speed: 0.08726815 },
-  '740476d7-a1e8-4864-8869-c8bf1818e6cc': { accuracy: 0.0001203005, speed: 0.03712515 },
-  '75c4d39f-a60f-4648-8b14-c36d5b3f24f1': { accuracy: -0.2221915, speed: 0.0764873 },
-  '7a7c4ff5-dfc9-462e-9773-1408428926ea': { accuracy: -0.1875195, speed: 0.03325965 },
-  '81abf74b-9ca1-4803-bf22-f857863a23d8': { accuracy: 0.7745385, speed: -0.1095125 },
-  '82ef5fa0-a116-403e-a578-3ecd55a27558': { accuracy: -0.01962825, speed: -0.01999115 },
-  '856ad082-d01f-4474-8396-64112462afbe': { accuracy: 0.6240485, speed: -0.173288 },
-  '9264ce1d-6067-4ca8-82b2-5f8ba5a3e166': { accuracy: 0.258036, speed: -0.0624928 },
-  '93e7c730-10b4-4550-beb1-8956dfb35e0e': { accuracy: 0.02694555, speed: -0.01767325 },
-  '95ac6fe3-0162-490a-8348-8970add935ed': { accuracy: -0.2807255, speed: 0.006386185 },
-  '978c57e9-71f5-4d05-8156-78ef9deb89e5': { accuracy: -0.1111145, speed: 0.0131006 },
-  '9ad3f157-07eb-4d59-bcda-45264342dad1': { accuracy: -0.2957535, speed: 0.07100575 },
-  '9deb3c87-c92b-4558-905b-10faed4cbef3': { accuracy: -0.1472245, speed: 0.0442816 },
-  'ac65303f-82ce-4258-949e-b71b608f6776': { accuracy: -0.388604, speed: 0.1651035 },
-  'd6ee2ea2-ed60-421a-89fc-96143d56366e': { accuracy: -1.03739, speed: 0.287173 },
-  'd7169c34-2de9-41f5-ac9a-ef1634ee3240': { accuracy: -0.2366865, speed: 0.03500695 },
-  'd920a561-0329-4a08-9554-3f1c26dabaf5': { accuracy: 0.4555275, speed: -0.153196 },
-  'de6a8234-a099-40b5-b936-4d50bcb540ac': { accuracy: -0.200219, speed: 0.03942035 },
-  'e5997cfd-26d6-4c4c-8510-7c98bbb8e028': { accuracy: 0.133376, speed: -0.07463835 },
-  'e8c2b069-cd6d-4426-aa64-4d2d351460b3': { accuracy: -0.3987605, speed: 0.105308 },
-  'e92eab89-90bf-4150-b543-a777337a1456': { accuracy: 0.176443, speed: -0.055957 },
-  'f1d37a23-0007-499c-bb7b-9323375d1876': { accuracy: -0.1116205, speed: 0.01045085 },
-  'f4a88a23-a062-4217-9503-0b08c0a7b9c2': { accuracy: -0.0328639, speed: 0.01650175 },
-  'f6829575-37e6-438b-b28e-f9feae96e8bb': { accuracy: 0.284823, speed: -0.008709015 },
-  'f9278b46-1473-43e2-86da-943a0acb85b5': { accuracy: 0.741447, speed: -0.1677545 },
-}
-
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, value))
-
-const formatDate = (value: string) =>
-  new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(value))
-
-const logistic = (value: number) => {
-  if (value >= 0) return 1 / (1 + Math.exp(-value))
-  const exponential = Math.exp(value)
-  return exponential / (1 + exponential)
-}
-
+const clamp = (value: number, minimum: number, maximum: number) =>
+  Math.min(maximum, Math.max(minimum, value))
 const daysBetween = (later: Date, earlier: Date) =>
   Math.max(0, (later.getTime() - earlier.getTime()) / 86_400_000)
+const formatDate = (value: string) =>
+  new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  }).format(new Date(value))
 
-const logGamma = (value: number): number => {
-  const coefficients = [
-    676.5203681218851, -1259.1392167224028, 771.3234287776531,
-    -176.6150291621406, 12.507343278686905, -0.13857109526572012,
-    9.984369578019572e-6, 1.5056327351493116e-7,
-  ]
-  if (value < 0.5) {
-    return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * value)) - logGamma(1 - value)
-  }
-  const shifted = value - 1
-  let series = 0.9999999999998099
-  coefficients.forEach((coefficient, index) => {
-    series += coefficient / (shifted + index + 1)
-  })
-  const t = shifted + coefficients.length - 0.5
-  return 0.5 * Math.log(2 * Math.PI) + (shifted + 0.5) * Math.log(t) - t + Math.log(series)
-}
-
-const logBetaBinomial = (correct: number, total: number, mu: number, phi: number) => {
-  const alpha = Math.max(mu * phi, 1e-10)
-  const beta = Math.max((1 - mu) * phi, 1e-10)
-  return logGamma(total + 1) - logGamma(correct + 1) - logGamma(total - correct + 1) +
-    logGamma(correct + alpha) + logGamma(total - correct + beta) -
-    logGamma(total + alpha + beta) - logGamma(alpha) - logGamma(beta) +
-    logGamma(alpha + beta)
-}
-
-// Abramowitz-Stegun approximation; adequate for the skew-normal likelihood.
-const normalCdf = (value: number) => {
-  const sign = value < 0 ? -1 : 1
-  const x = Math.abs(value) / Math.sqrt(2)
-  const t = 1 / (1 + 0.3275911 * x)
-  const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)
-  return 0.5 * (1 + sign * erf)
-}
-
-const invertMatrix = (matrix: readonly (readonly number[])[]) => {
-  const size = matrix.length
-  const augmented = matrix.map((row, index) => [
-    ...row,
-    ...Array.from({ length: size }, (_, column) => Number(index === column)),
-  ])
-  for (let column = 0; column < size; column += 1) {
-    let pivot = column
-    for (let row = column + 1; row < size; row += 1) {
-      if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row
-    }
-    ;[augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]]
-    const divisor = augmented[column][column]
-    if (Math.abs(divisor) < 1e-12) throw new Error('Learner covariance is singular')
-    augmented[column] = augmented[column].map(value => value / divisor)
-    for (let row = 0; row < size; row += 1) {
-      if (row === column) continue
-      const multiplier = augmented[row][column]
-      augmented[row] = augmented[row].map((value, index) => value - multiplier * augmented[column][index])
-    }
-  }
-  return augmented.map(row => row.slice(size))
-}
-
-const featureValues = (previousAttempts: number, gapDays: number) => ({
-  practice: Math.log1p(previousAttempts) / PRACTICE_SCALE,
-  priorAttempt: previousAttempts > 0 ? 1 : 0,
-  gap: previousAttempts > 0 ? Math.log1p(Math.max(0, gapDays)) / GAP_SCALE : 0,
-})
-
-function fixedPredictor(
-  mode: ResponseMode,
-  previousAttempts: number,
-  gapDays: number,
-  quizId: string,
-  response: 'accuracy' | 'speed',
-) {
-  const typed = mode === 'typed' ? 1 : 0
-  const { practice, priorAttempt, gap } = featureValues(previousAttempts, gapDays)
-  const terms = FIXED[response]
-  const quizEffect = QUIZ_EFFECTS[quizId] ?? { accuracy: 0, speed: 0 }
-  return terms.intercept + typed * terms.typed + practice * terms.practice +
-    priorAttempt * terms.priorAttempt + gap * terms.gap +
-    typed * practice * terms.typedPractice + typed * priorAttempt * terms.typedPriorAttempt +
-    typed * gap * terms.typedGap + quizEffect[response]
-}
-
-function prepareLearnerHistory(attempts: QuizAttempt[]): ModelHistoryRow[] {
-  const previousByQuiz = new Map<string, { count: number; completedAt: Date }>()
+function eligibleAttempts(attempts: QuizAttempt[]): QuizAttempt[] {
   return attempts
     .filter(attempt => {
       const questions = Number(attempt.total_questions)
       const correct = Number(attempt.correct_answers)
       const minutes = Number(attempt.total_time_minutes)
-      return !EXCLUDED_ATTEMPT_IDS.has(attempt.id) && questions > 0 && correct >= 0 &&
-        correct <= questions && minutes > 0 && minutes <= 30 && Boolean(attempt.completed_at)
+      return !EXCLUDED_ATTEMPT_IDS.has(attempt.id) && questions > 0 &&
+        correct >= 0 && correct <= questions && minutes > 0 && minutes <= 30 &&
+        Boolean(attempt.completed_at)
     })
     .slice()
-    .sort((a, b) => {
-      const difference = new Date(a.completed_at).getTime() - new Date(b.completed_at).getTime()
-      return difference || a.id.localeCompare(b.id)
-    })
-    .map(attempt => {
-      const previous = previousByQuiz.get(attempt.quiz_id)
-      const completedAt = new Date(attempt.completed_at)
-      const previousAttempts = previous?.count ?? 0
-      const gapDays = previous ? daysBetween(completedAt, previous.completedAt) : 0
-      const values = featureValues(previousAttempts, gapDays)
-      previousByQuiz.set(attempt.quiz_id, { count: previousAttempts + 1, completedAt })
-      return {
-        mode: attempt.quizzes?.response_mode === 'typed' ? 'typed' : 'options',
-        previousAttempts,
-        practice: values.practice,
-        priorAttempt: values.priorAttempt,
-        gap: values.gap,
-        quizId: attempt.quiz_id,
-        totalQuestions: Number(attempt.total_questions),
-        correctAnswers: Number(attempt.correct_answers),
-        logSecondsPerItem: Math.log(Number(attempt.total_time_minutes) * 60 / Number(attempt.total_questions)),
-      }
+    .sort((first, second) => {
+      const difference = new Date(first.completed_at).getTime() -
+        new Date(second.completed_at).getTime()
+      return difference || first.id.localeCompare(second.id)
     })
 }
 
-function learnerLogLikelihood(history: ModelHistoryRow[], effects: LearnerEffects) {
-  return history.reduce((sum, row) => {
-    const accuracyEta = fixedPredictor(
-      row.mode, row.previousAttempts, row.priorAttempt ? Math.expm1(row.gap * GAP_SCALE) : 0,
-      row.quizId, 'accuracy',
-    ) + effects[0] + effects[1] * row.practice
-    const mu = logistic(accuracyEta)
-    const phi = Math.exp(FIXED.accuracy.logPhi[row.mode])
-    const zi = logistic(FIXED.accuracy.zeroInflation[row.mode])
-    const betaBinomial = logBetaBinomial(row.correctAnswers, row.totalQuestions, mu, phi)
-    const accuracyLogLikelihood = row.correctAnswers === 0
-      ? Math.log(zi + (1 - zi) * Math.exp(betaBinomial))
-      : Math.log1p(-zi) + betaBinomial
-
-    const speedMean = fixedPredictor(
-      row.mode, row.previousAttempts, row.priorAttempt ? Math.expm1(row.gap * GAP_SCALE) : 0,
-      row.quizId, 'speed',
-    ) + effects[2] + effects[3] * row.practice
-    const sigma = Math.exp(FIXED.speed.logSigma[row.mode])
-    const alpha = FIXED.speed.alpha[row.mode]
-    const delta = alpha / Math.sqrt(1 + alpha * alpha)
-    const omega = sigma / Math.sqrt(1 - (2 / Math.PI) * delta * delta)
-    const xi = speedMean - omega * delta * Math.sqrt(2 / Math.PI)
-    const z = (row.logSecondsPerItem - xi) / omega
-    const speedLogLikelihood = Math.log(2) - Math.log(omega) -
-      0.5 * Math.log(2 * Math.PI) - 0.5 * z * z +
-      Math.log(Math.max(normalCdf(alpha * z), 1e-300))
-    return sum + accuracyLogLikelihood + speedLogLikelihood
-  }, 0)
-}
-
-function minimiseBfgs(objective: (values: number[]) => number, dimensions: number) {
-  let values = Array(dimensions).fill(0)
-  let inverseHessian = Array.from({ length: dimensions }, (_, row) =>
-    Array.from({ length: dimensions }, (_, column) => Number(row === column)))
-  const gradient = (at: number[]) => at.map((value, index) => {
-    const step = 1e-5 * (1 + Math.abs(value))
-    const upper = at.slice(); upper[index] += step
-    const lower = at.slice(); lower[index] -= step
-    return (objective(upper) - objective(lower)) / (2 * step)
-  })
-  let current = objective(values)
-  let currentGradient = gradient(values)
-  for (let iteration = 0; iteration < 250; iteration += 1) {
-    if (Math.max(...currentGradient.map(Math.abs)) < 1e-7) break
-    let direction = inverseHessian.map(row => -row.reduce(
-      (sum, entry, index) => sum + entry * currentGradient[index], 0))
-    if (direction.reduce((sum, entry, index) => sum + entry * currentGradient[index], 0) >= 0) {
-      direction = currentGradient.map(entry => -entry)
-      inverseHessian = inverseHessian.map((row, rowIndex) => row.map((_, columnIndex) => Number(rowIndex === columnIndex)))
-    }
-    const directionalDerivative = direction.reduce((sum, entry, index) => sum + entry * currentGradient[index], 0)
-    let step = 1
-    let candidate = values.map((value, index) => value + step * direction[index])
-    let candidateValue = objective(candidate)
-    while ((!Number.isFinite(candidateValue) || candidateValue > current + 1e-4 * step * directionalDerivative) && step > 1e-8) {
-      step *= 0.5
-      candidate = values.map((value, index) => value + step * direction[index])
-      candidateValue = objective(candidate)
-    }
-    if (step <= 1e-8) break
-    const nextGradient = gradient(candidate)
-    const s = candidate.map((value, index) => value - values[index])
-    const y = nextGradient.map((value, index) => value - currentGradient[index])
-    const sy = s.reduce((sum, entry, index) => sum + entry * y[index], 0)
-    if (sy > 1e-12) {
-      const rho = 1 / sy
-      const identityMinusSY = inverseHessian.map((row, i) => row.map((_, j) => Number(i === j) - rho * s[i] * y[j]))
-      const identityMinusYS = inverseHessian.map((row, i) => row.map((_, j) => Number(i === j) - rho * y[i] * s[j]))
-      const multiplied = identityMinusSY.map(row => inverseHessian[0].map((_, j) =>
-        row.reduce((sum, entry, k) => sum + entry * inverseHessian[k][j], 0)))
-      inverseHessian = multiplied.map((row, i) => identityMinusYS[0].map((_, j) =>
-        row.reduce((sum, entry, k) => sum + entry * identityMinusYS[k][j], 0) + rho * s[i] * s[j]))
-    }
-    values = candidate
-    current = candidateValue
-    currentGradient = nextGradient
-  }
-  return { values, inverseHessian }
-}
-
-function estimateLearnerPosterior(history: ModelHistoryRow[]): LearnerPosterior {
-  if (!history.length) {
+function toStateSpaceHistory(attempts: QuizAttempt[]): AttemptObservation[] {
+  const chronological = eligibleAttempts(attempts)
+  return chronological.map((attempt, index) => {
+    const previous = index > 0 ? chronological[index - 1] : null
     return {
-      effects: [0, 0, 0, 0],
-      activeIndices: [0, 2],
-      activeCovariance: [
-        [LEARNER_COVARIANCE[0][0], LEARNER_COVARIANCE[0][2]],
-        [LEARNER_COVARIANCE[2][0], LEARNER_COVARIANCE[2][2]],
-      ],
+      correctAnswers: Number(attempt.correct_answers),
+      totalQuestions: Number(attempt.total_questions),
+      secondsPerItem: Number(attempt.total_time_minutes) * 60 /
+        Number(attempt.total_questions),
+      gapDays: previous
+        ? daysBetween(new Date(attempt.completed_at), new Date(previous.completed_at))
+        : 0,
     }
-  }
-  const active = history.length >= MINIMUM_HISTORY_FOR_SLOPES ? [0, 1, 2, 3] : [0, 2]
-  const covariance = active.map(row => active.map(column => LEARNER_COVARIANCE[row][column]))
-  const precision = invertMatrix(covariance)
-  const objective = (activeValues: number[]) => {
-    const effects: LearnerEffects = [0, 0, 0, 0]
-    active.forEach((effectIndex, index) => { effects[effectIndex] = activeValues[index] })
-    const priorPenalty = 0.5 * activeValues.reduce((outer, value, row) =>
-      outer + value * activeValues.reduce((inner, other, column) => inner + precision[row][column] * other, 0), 0)
-    return priorPenalty - learnerLogLikelihood(history, effects)
-  }
-  const fitted = minimiseBfgs(objective, active.length)
-  const effects: LearnerEffects = [0, 0, 0, 0]
-  active.forEach((effectIndex, index) => { effects[effectIndex] = fitted.values[index] })
-  const activeCovariance = fitted.inverseHessian.map((row, rowIndex) =>
-    row.map((value, columnIndex) =>
-      (value + fitted.inverseHessian[columnIndex][rowIndex]) / 2))
-  return { effects, activeIndices: active, activeCovariance }
-}
-
-const hashString = (value: string) => {
-  let hash = 2166136261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return hash >>> 0
-}
-
-const seededRandom = (seed: number) => {
-  let state = seed >>> 0
-  return () => {
-    state += 0x6d2b79f5
-    let value = state
-    value = Math.imul(value ^ (value >>> 15), value | 1)
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
-    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296
-  }
-}
-
-const normalSampler = (random: () => number) => {
-  let spare: number | null = null
-  return () => {
-    if (spare !== null) {
-      const value = spare
-      spare = null
-      return value
-    }
-    const radius = Math.sqrt(-2 * Math.log(Math.max(random(), 1e-12)))
-    const angle = 2 * Math.PI * random()
-    spare = radius * Math.sin(angle)
-    return radius * Math.cos(angle)
-  }
-}
-
-const gammaSample = (
-  shape: number,
-  random: () => number,
-  normal: () => number,
-): number => {
-  if (shape < 1) {
-    return gammaSample(shape + 1, random, normal) * random() ** (1 / shape)
-  }
-  const d = shape - 1 / 3
-  const c = 1 / Math.sqrt(9 * d)
-  while (true) {
-    const z = normal()
-    const transformed = (1 + c * z) ** 3
-    if (transformed <= 0) continue
-    const uniform = random()
-    if (uniform < 1 - 0.0331 * z ** 4 ||
-      Math.log(uniform) < 0.5 * z * z + d * (1 - transformed + Math.log(transformed))) {
-      return d * transformed
-    }
-  }
-}
-
-const betaSample = (
-  alpha: number,
-  beta: number,
-  random: () => number,
-  normal: () => number,
-) => {
-  const first = gammaSample(Math.max(alpha, 1e-8), random, normal)
-  const second = gammaSample(Math.max(beta, 1e-8), random, normal)
-  return first / (first + second)
-}
-
-const binomialSample = (trials: number, probability: number, random: () => number) => {
-  let successes = 0
-  for (let trial = 0; trial < trials; trial += 1) {
-    if (random() < probability) successes += 1
-  }
-  return successes
-}
-
-const cholesky = (matrix: number[][]) => {
-  const size = matrix.length
-  for (let attempt = 0; attempt < 9; attempt += 1) {
-    const jitter = attempt === 0 ? 0 : 10 ** (-11 + attempt)
-    const result = Array.from({ length: size }, () => Array(size).fill(0))
-    let valid = true
-    for (let row = 0; row < size && valid; row += 1) {
-      for (let column = 0; column <= row; column += 1) {
-        let value = (matrix[row][column] + matrix[column][row]) / 2
-        if (row === column) value += jitter
-        for (let index = 0; index < column; index += 1) {
-          value -= result[row][index] * result[column][index]
-        }
-        if (row === column) {
-          if (value <= 0 || !Number.isFinite(value)) {
-            valid = false
-            break
-          }
-          result[row][column] = Math.sqrt(value)
-        } else {
-          result[row][column] = value / result[column][column]
-        }
-      }
-    }
-    if (valid) return result
-  }
-  throw new Error('Could not stabilise posterior covariance')
-}
-
-const sampleMultivariateNormal = (
-  means: number[],
-  covariance: number[][],
-  normal: () => number,
-) => {
-  const factor = cholesky(covariance)
-  const z = means.map(() => normal())
-  return means.map((mean, row) => mean + factor[row].reduce(
-    (sum, value, column) => sum + value * z[column], 0))
-}
-
-const quantile = (values: number[], probability: number) => {
-  const sorted = values.slice().sort((a, b) => a - b)
-  const position = (sorted.length - 1) * probability
-  const lower = Math.floor(position)
-  const fraction = position - lower
-  return sorted[lower] + fraction * (sorted[Math.min(lower + 1, sorted.length - 1)] - sorted[lower])
-}
-
-const fixedDrawValue = (draw: PosteriorDraw, rawTerm: string) => {
-  const index = FIXED_DRAW_INDEX.get(rawTerm)
-  if (index === undefined) throw new Error(`Missing posterior term: ${rawTerm}`)
-  return draw.fixed[index]
-}
-
-function drawLinearPredictor(
-  draw: PosteriorDraw,
-  mode: ResponseMode,
-  previousAttempts: number,
-  gapDays: number,
-  response: 'correctanswers' | 'logsecondsperitem',
-  quizEffect: number,
-) {
-  const typed = mode === 'typed' ? 1 : 0
-  const { practice, priorAttempt, gap } = featureValues(previousAttempts, gapDays)
-  return fixedDrawValue(draw, `${response}_Intercept`) +
-    gap * fixedDrawValue(draw, `${response}_gap_value`) +
-    practice * fixedDrawValue(draw, `${response}_practice_value`) +
-    priorAttempt * fixedDrawValue(draw, `${response}_prior_attempt`) +
-    typed * fixedDrawValue(draw, `${response}_typed`) +
-    typed * gap * fixedDrawValue(draw, `${response}_typed:gap_value`) +
-    typed * practice * fixedDrawValue(draw, `${response}_typed:practice_value`) +
-    typed * priorAttempt * fixedDrawValue(draw, `${response}_typed:prior_attempt`) +
-    quizEffect
-}
-
-function simulateAttempt(
-  draw: PosteriorDraw,
-  learnerEffects: LearnerEffects,
-  quizEffects: [number, number],
-  previousAttempts: number,
-  gapDays: number,
-  mode: ResponseMode,
-  totalQuestions: number,
-  random: () => number,
-  normal: () => number,
-) {
-  const practice = featureValues(previousAttempts, gapDays).practice
-  const accuracyEta = drawLinearPredictor(
-    draw, mode, previousAttempts, gapDays, 'correctanswers', quizEffects[0],
-  ) + learnerEffects[0] + learnerEffects[1] * practice
-  const mu = logistic(accuracyEta)
-  const phi = Math.exp(fixedDrawValue(
-    draw, `phi_correctanswers_response_mode${mode}`,
-  ))
-  const zeroProbability = logistic(fixedDrawValue(
-    draw, `zi_correctanswers_response_mode${mode}`,
-  ))
-  const correctAnswers = random() < zeroProbability
-    ? 0
-    : binomialSample(
-      totalQuestions,
-      betaSample(mu * phi, (1 - mu) * phi, random, normal),
-      random,
-    )
-  const accuracy = correctAnswers / totalQuestions
-
-  const speedMean = drawLinearPredictor(
-    draw, mode, previousAttempts, gapDays, 'logsecondsperitem', quizEffects[1],
-  ) + learnerEffects[2] + learnerEffects[3] * practice
-  const sigma = Math.exp(fixedDrawValue(
-    draw, `sigma_logsecondsperitem_response_mode${mode}`,
-  ))
-  const alpha = fixedDrawValue(
-    draw, `alpha_logsecondsperitem_response_mode${mode}`,
-  )
-  const delta = alpha / Math.sqrt(1 + alpha * alpha)
-  const omega = sigma / Math.sqrt(1 - (2 / Math.PI) * delta * delta)
-  const xi = speedMean - omega * delta * Math.sqrt(2 / Math.PI)
-  const logSeconds = xi + omega * (
-    delta * Math.abs(normal()) + Math.sqrt(1 - delta * delta) * normal()
-  )
-  const secondsPerItem = Math.exp(logSeconds)
-  return {
-    accuracy,
-    secondsPerItem,
-    rate: 60 * accuracy / secondsPerItem,
-  }
-}
-
-function expectedRateForDraw(
-  draw: PosteriorDraw,
-  learnerEffects: LearnerEffects,
-  quizEffects: [number, number],
-  previousAttempts: number,
-  gapDays: number,
-  mode: ResponseMode,
-) {
-  const practice = featureValues(previousAttempts, gapDays).practice
-  const accuracyEta = drawLinearPredictor(
-    draw, mode, previousAttempts, gapDays, 'correctanswers', quizEffects[0],
-  ) + learnerEffects[0] + learnerEffects[1] * practice
-  const expectedAccuracy =
-    (1 - logistic(fixedDrawValue(draw, `zi_correctanswers_response_mode${mode}`))) *
-    logistic(accuracyEta)
-  const speedMean = drawLinearPredictor(
-    draw, mode, previousAttempts, gapDays, 'logsecondsperitem', quizEffects[1],
-  ) + learnerEffects[2] + learnerEffects[3] * practice
-  return 60 * expectedAccuracy / Math.exp(speedMean)
-}
-
-function simulatePosteriorPredictive({
-  previousAttempts,
-  gapDays,
-  mode,
-  quizId,
-  totalQuestions,
-  learnerPosterior,
-  historicalGaps,
-  seedKey,
-}: {
-  previousAttempts: number
-  gapDays: number
-  mode: ResponseMode
-  quizId: string
-  totalQuestions: number
-  learnerPosterior: LearnerPosterior
-  historicalGaps: number[]
-  seedKey: string
-}) {
-  const random = seededRandom(hashString(`${MODEL_VERSION}|${quizId}|${seedKey}`))
-  const normal = normalSampler(random)
-  const nextAccuracy: number[] = []
-  const nextRate: number[] = []
-  const nextSeconds: number[] = []
-  const accuracyGoal: boolean[] = []
-  const fluencyGoal: boolean[] = []
-  const jointGoal: boolean[] = []
-  const attemptsToSustained: number[] = []
-  const fittedRates = historicalGaps.map(() => [] as number[])
-  const forecastRates = Array.from({ length: FORECAST_SESSIONS }, () => [] as number[])
-  const quizIndex = QUIZ_DRAW_INDEX.get(quizId)
-
-  POSTERIOR_BUNDLE.draws.forEach(draw => {
-    const activeMeans = learnerPosterior.activeIndices.map(
-      index => learnerPosterior.effects[index],
-    )
-    let activeEffects: number[]
-    try {
-      activeEffects = sampleMultivariateNormal(
-        activeMeans, learnerPosterior.activeCovariance, normal,
-      )
-    } catch {
-      activeEffects = activeMeans
-    }
-    const learnerEffects: LearnerEffects = [0, 0, 0, 0]
-    learnerPosterior.activeIndices.forEach((effectIndex, index) => {
-      learnerEffects[effectIndex] = activeEffects[index]
-    })
-
-    let quizEffects: [number, number]
-    if (quizIndex === undefined) {
-      const sampled = sampleMultivariateNormal([0, 0], QUIZ_COVARIANCE.map(row => [...row]), normal)
-      quizEffects = [sampled[0], sampled[1]]
-    } else {
-      quizEffects = [draw.quiz_accuracy[quizIndex], draw.quiz_speed[quizIndex]]
-    }
-
-    historicalGaps.forEach((historicalGap, index) => {
-      fittedRates[index].push(expectedRateForDraw(
-        draw,
-        learnerEffects,
-        quizEffects,
-        index,
-        historicalGap,
-        mode,
-      ))
-    })
-
-    let consecutiveSuccesses = 0
-    let sustainedAt: number | null = null
-    for (let futureAttempt = 1; futureAttempt <= FORECAST_SESSIONS; futureAttempt += 1) {
-      const result = simulateAttempt(
-        draw,
-        learnerEffects,
-        quizEffects,
-        previousAttempts + futureAttempt - 1,
-        futureAttempt === 1 ? gapDays : 1,
-        mode,
-        totalQuestions,
-        random,
-        normal,
-      )
-      forecastRates[futureAttempt - 1].push(result.rate)
-      const meetsAccuracy = result.accuracy >= ACCURACY_AIM / 100
-      const meetsFluency = result.rate >= FLUENCY_AIMS[mode]
-      const meetsJointGoal = meetsAccuracy && meetsFluency
-      if (futureAttempt <= MASTERY_HORIZON) {
-        consecutiveSuccesses = meetsJointGoal ? consecutiveSuccesses + 1 : 0
-        if (sustainedAt === null && consecutiveSuccesses >= 2) {
-          sustainedAt = futureAttempt
-        }
-      }
-      if (futureAttempt === 1) {
-        nextAccuracy.push(result.accuracy * 100)
-        nextRate.push(result.rate)
-        nextSeconds.push(result.secondsPerItem)
-        accuracyGoal.push(meetsAccuracy)
-        fluencyGoal.push(meetsFluency)
-        jointGoal.push(meetsJointGoal)
-      }
-    }
-    if (sustainedAt !== null) attemptsToSustained.push(sustainedAt)
   })
-
-  const proportionTrue = (values: boolean[]) =>
-    values.filter(Boolean).length / Math.max(1, values.length)
-  const interval = (values: number[]) => ({
-    median: quantile(values, 0.5),
-    lower80: quantile(values, 0.1),
-    upper80: quantile(values, 0.9),
-  })
-
-  return {
-    accuracyMedian: quantile(nextAccuracy, 0.5),
-    accuracyLower80: quantile(nextAccuracy, 0.1),
-    accuracyUpper80: quantile(nextAccuracy, 0.9),
-    rateMedian: quantile(nextRate, 0.5),
-    rateLower80: quantile(nextRate, 0.1),
-    rateUpper80: quantile(nextRate, 0.9),
-    secondsMedian: quantile(nextSeconds, 0.5),
-    probabilityAccuracyGoal: proportionTrue(accuracyGoal),
-    probabilityFluencyGoal: proportionTrue(fluencyGoal),
-    probabilityJointGoal: proportionTrue(jointGoal),
-    probabilitySustainedMasteryWithinFive:
-      attemptsToSustained.length / POSTERIOR_BUNDLE.draws.length,
-    medianAttemptsToSustainedMastery: attemptsToSustained.length
-      ? quantile(attemptsToSustained, 0.5)
-      : null,
-    fittedRateTrajectory: fittedRates.map(interval),
-    forecastRateTrajectory: forecastRates.map(interval),
-  }
 }
 
-function fitBayesianLearningCurve(
-  attempts: QuizAttempt[],
-  allLearnerAttempts: QuizAttempt[],
-  _aim: number,
-  mode: ResponseMode,
-): BayesianModel | null {
-  if (!attempts.length) return null
-
-  const chronological = attempts.slice().sort(
-    (a, b) => new Date(a.completed_at).getTime() - new Date(b.completed_at).getTime(),
-  )
-  const observed = chronological.map((attempt, index) => ({
+function toObservedPoints(attempts: QuizAttempt[]): ObservedPoint[] {
+  return eligibleAttempts(attempts).map((attempt, index) => ({
     attempt: index + 1,
     rate: Math.max(0, Number(attempt.fluency_rate) || 0),
     accuracy: Number(attempt.accuracy_percentage) || 0,
     date: attempt.completed_at,
   }))
-  const learnerHistory = prepareLearnerHistory(allLearnerAttempts)
-  const learnerPosterior = estimateLearnerPosterior(learnerHistory)
-  const historicalGaps = chronological.map((attempt, index) => {
-    const previous = index > 0 ? chronological[index - 1] : null
-    return previous
-      ? daysBetween(new Date(attempt.completed_at), new Date(previous.completed_at))
-      : 0
-  })
-  const latest = chronological[chronological.length - 1]
-  const predictive = simulatePosteriorPredictive({
-    previousAttempts: chronological.length,
-    gapDays: daysBetween(new Date(), new Date(latest.completed_at)),
-    mode,
-    quizId: latest.quiz_id,
-    totalQuestions: Math.max(1, Math.round(Number(latest.total_questions))),
-    learnerPosterior,
-    historicalGaps,
-    seedKey: learnerHistory.map((row, index) =>
-      `${index}:${row.quizId}:${row.correctAnswers}:${row.logSecondsPerItem}`).join('|'),
-  })
-  const curve: ChartPoint[] = [
-    ...predictive.fittedRateTrajectory.map((point, index) => ({
-      attempt: index + 1,
-      ...point,
-      forecast: false,
-    })),
-    ...predictive.forecastRateTrajectory.map((point, index) => ({
-      attempt: chronological.length + index + 1,
-      ...point,
-      forecast: true,
-    })),
-  ]
-  const predictiveNext = {
-    accuracy: predictive.accuracyMedian,
-    secondsPerItem: predictive.secondsMedian,
-    rate: predictive.rateMedian,
-  }
-  return {
-    observed,
-    curve,
-    next: predictiveNext,
-    status: observed.length < 2 ? 'limited' : 'provisional',
-    quizEffectUsed: Boolean(QUIZ_EFFECTS[latest.quiz_id]),
-    historyObservations: learnerHistory.length,
-    slopesActive: learnerHistory.length >= MINIMUM_HISTORY_FOR_SLOPES,
-    personalised: learnerHistory.length > 0,
-    predictive,
-  }
 }
 
-function calculateCeleration(attempts: QuizAttempt[]) {
-  const daily = new Map<string, { time: number; rate: number }>()
-  attempts
-    .slice()
-    .sort((a, b) => new Date(a.completed_at).getTime() - new Date(b.completed_at).getTime())
-    .forEach(attempt => {
-      const time = new Date(attempt.completed_at).getTime()
-      const day = new Date(time).toISOString().slice(0, 10)
-      if (!daily.has(day)) daily.set(day, { time, rate: Math.max(0.1, attempt.fluency_rate) })
-    })
-
-  const values = Array.from(daily.values())
-  if (values.length < 2) return null
-  const first = values[0].time
-  const x = values.map(value => (value.time - first) / (7 * 86_400_000))
-  const y = values.map(value => Math.log10(value.rate))
-  const n = x.length
-  const sumX = x.reduce((sum, value) => sum + value, 0)
-  const sumY = y.reduce((sum, value) => sum + value, 0)
-  const sumXY = x.reduce((sum, value, index) => sum + value * y[index], 0)
-  const sumX2 = x.reduce((sum, value) => sum + value * value, 0)
-  const denominator = n * sumX2 - sumX * sumX
-  if (!denominator) return null
-  const slope = (n * sumXY - sumX * sumY) / denominator
-  return { factorPerWeek: 10 ** slope, days: daily.size }
-}
-
-function FluencyTrajectory({ model, aim }: { model: BayesianModel; aim: number }) {
+function FluencyTrajectory({
+  observed,
+  forecast,
+  aim,
+}: {
+  observed: ObservedPoint[]
+  forecast: NextAttemptForecast
+  aim: number
+}) {
   const width = 920
   const height = 470
   const margin = { top: 34, right: 34, bottom: 64, left: 76 }
   const plotWidth = width - margin.left - margin.right
   const plotHeight = height - margin.top - margin.bottom
-  const finalAttempt = model.curve[model.curve.length - 1]?.attempt ?? 1
+  const predictedAttempt = observed.length + 1
+  const finalAttempt = Math.max(2, predictedAttempt)
   const yMaximumRaw = Math.max(
     aim * 1.35,
-    ...model.observed.map(point => point.rate * 1.15),
-    ...model.curve.map(point => point.upper80 * 1.08),
+    ...observed.map(point => point.rate * 1.15),
+    forecast.correctPerMinute.upper80 * 1.08,
   )
   const yMaximum = Math.max(5, Math.ceil(yMaximumRaw / 5) * 5)
-  const xAt = (attempt: number) =>
-    margin.left + ((attempt - 1) / Math.max(1, finalAttempt - 1)) * plotWidth
-  const yAt = (rate: number) =>
-    margin.top + plotHeight - (clamp(rate, 0, yMaximum) / yMaximum) * plotHeight
-  const fitted = model.curve.filter(point => !point.forecast)
-  const forecast = model.curve.filter(point => point.forecast)
-  const forecastLine = fitted.length ? [fitted[fitted.length - 1], ...forecast] : forecast
-  const fittedPath = fitted.map(point => `${xAt(point.attempt)},${yAt(point.median)}`).join(' ')
-  const forecastPath = forecastLine.map(point => `${xAt(point.attempt)},${yAt(point.median)}`).join(' ')
-  const observedPath = model.observed.map(point => `${xAt(point.attempt)},${yAt(point.rate)}`).join(' ')
-  const bandPath = (points: ChartPoint[]) => {
-    if (!points.length) return ''
-    const upper = points.map(point => `${xAt(point.attempt)},${yAt(point.upper80)}`)
-    const lower = points.slice().reverse().map(point => `${xAt(point.attempt)},${yAt(point.lower80)}`)
-    return `M ${upper.join(' L ')} L ${lower.join(' L ')} Z`
-  }
-  const fittedBandPath = bandPath(fitted)
-  const forecastBandPath = bandPath(forecast)
-  const yTicks = Array.from({ length: 6 }, (_, index) => (yMaximum / 5) * index)
-  const xTickStep = finalAttempt > 16 ? 2 : 1
-  const xTicks = model.curve.filter(point =>
-    point.attempt === 1 || point.attempt === finalAttempt || point.attempt % xTickStep === 0)
-  const forecastBoundary = model.observed.length < finalAttempt
-    ? (xAt(model.observed.length) + xAt(model.observed.length + 1)) / 2
-    : xAt(finalAttempt)
+  const xAt = (attempt: number) => margin.left +
+    ((attempt - 1) / Math.max(1, finalAttempt - 1)) * plotWidth
+  const yAt = (rate: number) => margin.top + plotHeight -
+    (clamp(rate, 0, yMaximum) / yMaximum) * plotHeight
+  const observedPath = observed
+    .map(point => `${xAt(point.attempt)},${yAt(point.rate)}`).join(' ')
+  const yTicks = Array.from({ length: 6 }, (_, index) => yMaximum / 5 * index)
+  const xTicks = Array.from({ length: finalAttempt }, (_, index) => index + 1)
+    .filter(value => finalAttempt <= 16 || value === 1 || value === finalAttempt || value % 2 === 0)
+  const predictionX = xAt(predictedAttempt)
+  const pointY = yAt(forecast.correctPerMinute.point)
+  const lowerY = yAt(forecast.correctPerMinute.lower80)
+  const upperY = yAt(forecast.correctPerMinute.upper80)
+  const lastObserved = observed[observed.length - 1]
 
   return (
     <div className="bl-trajectory-scroll">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="bl-trajectory-chart"
-        role="img"
-        aria-label="Bayesian fluency trajectory with 80 percent credible and posterior-predictive intervals across ten future sessions"
-      >
+      <svg viewBox={`0 0 ${width} ${height}`} className="bl-trajectory-chart"
+        role="img" aria-label="Observed fluency timings and state-space prediction for the next session">
         <defs>
           <pattern id="bl-chart-grid" width="12" height="12" patternUnits="userSpaceOnUse">
             <path d="M 12 0 L 0 0 0 12" fill="none" stroke="#9aaa83" strokeWidth="0.35" opacity="0.28" />
           </pattern>
         </defs>
-
-        <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} fill="url(#bl-chart-grid)" stroke="#152219" />
-
-        {yTicks.map(tick => (
-          <g key={tick}>
-            <line x1={margin.left} y1={yAt(tick)} x2={width - margin.right} y2={yAt(tick)} stroke="#9aaa83" strokeWidth="0.7" opacity="0.55" />
-            <text x={margin.left - 14} y={yAt(tick) + 4} textAnchor="end" className="bl-chart-tick">{tick.toFixed(0)}</text>
-          </g>
-        ))}
-
-        {xTicks.map(point => (
-          <g key={point.attempt}>
-            <line x1={xAt(point.attempt)} y1={margin.top + plotHeight} x2={xAt(point.attempt)} y2={margin.top + plotHeight + 7} stroke="#152219" />
-            <text x={xAt(point.attempt)} y={margin.top + plotHeight + 25} textAnchor="middle" className="bl-chart-tick">{point.attempt}</text>
-          </g>
-        ))}
-
-        {fittedBandPath && (
-          <path d={fittedBandPath} fill="#9aaa83" opacity="0.18">
-            <title>80% credible interval for the fitted expected trajectory</title>
-          </path>
-        )}
-        {forecastBandPath && (
-          <path d={forecastBandPath} fill="#2f6f4e" opacity="0.22">
-            <title>80% posterior-predictive interval for future observed timings</title>
-          </path>
-        )}
-
-        <line x1={margin.left} y1={yAt(aim)} x2={width - margin.right} y2={yAt(aim)} className="bl-aim-line" />
-        <text x={width - margin.right - 5} y={yAt(aim) - 9} textAnchor="end" className="bl-aim-label">Aim {aim}/min</text>
-
-        {model.observed.length < finalAttempt && (
-          <>
-            <line x1={forecastBoundary} y1={margin.top} x2={forecastBoundary} y2={margin.top + plotHeight} className="bl-forecast-boundary" />
-            <text x={forecastBoundary + 10} y={margin.top + 18} className="bl-forecast-label">10-session forecast</text>
-          </>
-        )}
-
-        {model.observed.length > 1 && <polyline points={observedPath} className="bl-observed-path" />}
-        {fittedPath && <polyline points={fittedPath} className="bl-model-line" />}
-        {forecastPath && <polyline points={forecastPath} className="bl-model-line bl-model-forecast" />}
-
-        {model.observed.map(point => (
-          <circle
-            key={point.attempt}
-            cx={xAt(point.attempt)}
-            cy={yAt(point.rate)}
-            r="6"
-            className={point.accuracy >= ACCURACY_AIM ? 'bl-observation is-accurate' : 'bl-observation is-building'}
-          >
-            <title>{`Attempt ${point.attempt} · ${point.rate.toFixed(1)}/min · ${point.accuracy.toFixed(0)}% · ${formatDate(point.date)}`}</title>
-          </circle>
-        ))}
-
-        <text x={margin.left + plotWidth / 2} y={height - 14} textAnchor="middle" className="bl-chart-axis">Attempt number</text>
-        <text x="19" y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 19 ${margin.top + plotHeight / 2})`} className="bl-chart-axis">Correct responses per minute</text>
+        <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight}
+          fill="url(#bl-chart-grid)" stroke="#152219" />
+        {yTicks.map(tick => <g key={tick}>
+          <line x1={margin.left} y1={yAt(tick)} x2={width - margin.right} y2={yAt(tick)}
+            stroke="#9aaa83" strokeWidth="0.7" opacity="0.55" />
+          <text x={margin.left - 14} y={yAt(tick) + 4} textAnchor="end"
+            className="bl-chart-tick">{tick.toFixed(0)}</text>
+        </g>)}
+        {xTicks.map(attempt => <g key={attempt}>
+          <line x1={xAt(attempt)} y1={margin.top + plotHeight} x2={xAt(attempt)}
+            y2={margin.top + plotHeight + 7} stroke="#152219" />
+          <text x={xAt(attempt)} y={margin.top + plotHeight + 25} textAnchor="middle"
+            className="bl-chart-tick">{attempt}</text>
+        </g>)}
+        <line x1={margin.left} y1={yAt(aim)} x2={width - margin.right} y2={yAt(aim)}
+          className="bl-aim-line" />
+        <text x={width - margin.right - 5} y={yAt(aim) - 9} textAnchor="end"
+          className="bl-aim-label">Aim {aim}/min</text>
+        {observed.length > 1 && <polyline points={observedPath} className="bl-observed-path" />}
+        {lastObserved && <line x1={xAt(lastObserved.attempt)} y1={yAt(lastObserved.rate)}
+          x2={predictionX} y2={pointY} className="bl-model-line bl-model-forecast" />}
+        <line x1={predictionX} y1={upperY} x2={predictionX} y2={lowerY}
+          stroke="#2f6f4e" strokeWidth="10" opacity="0.25">
+          <title>80% posterior-predictive range</title>
+        </line>
+        <line x1={predictionX - 9} y1={upperY} x2={predictionX + 9} y2={upperY}
+          stroke="#2f6f4e" strokeWidth="2" />
+        <line x1={predictionX - 9} y1={lowerY} x2={predictionX + 9} y2={lowerY}
+          stroke="#2f6f4e" strokeWidth="2" />
+        <rect x={predictionX - 6} y={pointY - 6} width="12" height="12"
+          transform={`rotate(45 ${predictionX} ${pointY})`} fill="#2f6f4e">
+          <title>{`Predicted next session: ${forecast.correctPerMinute.point.toFixed(1)}/min (${forecast.correctPerMinute.lower80.toFixed(1)}–${forecast.correctPerMinute.upper80.toFixed(1)})`}</title>
+        </rect>
+        {observed.map(point => <circle key={point.attempt} cx={xAt(point.attempt)}
+          cy={yAt(point.rate)} r="6"
+          className={point.accuracy >= ACCURACY_AIM
+            ? 'bl-observation is-accurate' : 'bl-observation is-building'}>
+          <title>{`Attempt ${point.attempt} · ${point.rate.toFixed(1)}/min · ${point.accuracy.toFixed(0)}% · ${formatDate(point.date)}`}</title>
+        </circle>)}
+        <text x={margin.left + plotWidth / 2} y={height - 14} textAnchor="middle"
+          className="bl-chart-axis">Attempt number</text>
+        <text x="19" y={margin.top + plotHeight / 2} textAnchor="middle"
+          transform={`rotate(-90 19 ${margin.top + plotHeight / 2})`}
+          className="bl-chart-axis">Correct responses per minute</text>
       </svg>
     </div>
   )
 }
 
-function AccuracyStrip({ model }: { model: BayesianModel }) {
-  return (
-    <div className="bl-accuracy-strip" aria-label="Accuracy by attempt">
-      {model.observed.map(point => (
-        <div key={point.attempt} className={point.accuracy >= ACCURACY_AIM ? 'is-accurate' : 'is-building'}>
-          <span>A{String(point.attempt).padStart(2, '0')}</span>
-          <strong>{point.accuracy.toFixed(0)}%</strong>
-          <small>{formatDate(point.date)}</small>
-        </div>
-      ))}
-    </div>
-  )
+function AccuracyStrip({ observed }: { observed: ObservedPoint[] }) {
+  return <div className="bl-accuracy-strip" aria-label="Accuracy by attempt">
+    {observed.map(point => <div key={point.attempt}
+      className={point.accuracy >= ACCURACY_AIM ? 'is-accurate' : 'is-building'}>
+      <span>A{String(point.attempt).padStart(2, '0')}</span>
+      <strong>{point.accuracy.toFixed(0)}%</strong>
+      <small>{formatDate(point.date)}</small>
+    </div>)}
+  </div>
 }
 
 export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([])
   const [selectedQuiz, setSelectedQuiz] = useState('')
+  const [practiceEveryDays, setPracticeEveryDays] = useState(1)
   const [loading, setLoading] = useState(true)
   const [showTechnical, setShowTechnical] = useState(false)
   const loadingRef = useRef(false)
@@ -1057,32 +219,16 @@ export default function ProgressPage() {
   const router = useRouter()
 
   useEffect(() => {
-    if (!user) {
-      router.push('/')
-      return
-    }
+    if (!user) { router.push('/'); return }
     if (loadingRef.current) return
-
     const loadAttempts = async () => {
       loadingRef.current = true
       try {
-        const { data, error } = await supabase
-          .from('quiz_attempts')
-          .select(`
-            id,
-            quiz_id,
-            student_name,
-            total_questions,
-            correct_answers,
-            accuracy_percentage,
-            fluency_rate,
-            total_time_minutes,
-            completed_at,
-            quizzes!inner(title, description, response_mode)
-          `)
-          .eq('user_id', user.id)
-          .order('completed_at', { ascending: false })
-
+        const { data, error } = await supabase.from('quiz_attempts').select(`
+          id, quiz_id, student_name, total_questions, correct_answers,
+          accuracy_percentage, fluency_rate, total_time_minutes, completed_at,
+          quizzes!inner(title, description, response_mode)
+        `).eq('user_id', user.id).order('completed_at', { ascending: false })
         if (error) throw error
         const typedData = (data || []).map((item: any) => ({
           ...item,
@@ -1097,7 +243,6 @@ export default function ProgressPage() {
         loadingRef.current = false
       }
     }
-
     void loadAttempts()
   }, [router, user])
 
@@ -1113,7 +258,6 @@ export default function ProgressPage() {
     })
     return Array.from(map.entries())
   }, [attempts])
-
   const selectedAttempts = useMemo(
     () => attempts.filter(attempt => attempt.quiz_id === selectedQuiz),
     [attempts, selectedQuiz],
@@ -1121,246 +265,189 @@ export default function ProgressPage() {
   const selectedMeta = quizzes.find(([id]) => id === selectedQuiz)?.[1]
   const selectedMode: ResponseMode = selectedMeta?.mode ?? 'options'
   const fluencyAim = FLUENCY_AIMS[selectedMode]
-  const model = useMemo(
-    () => fitBayesianLearningCurve(selectedAttempts, attempts, fluencyAim, selectedMode),
-    [selectedAttempts, attempts, fluencyAim, selectedMode],
-  )
-  const celeration = useMemo(() => calculateCeleration(selectedAttempts), [selectedAttempts])
-  const chronological = useMemo(
-    () => selectedAttempts.slice().sort(
-      (a, b) => new Date(a.completed_at).getTime() - new Date(b.completed_at).getTime(),
-    ),
-    [selectedAttempts],
-  )
+  const chronological = useMemo(() => eligibleAttempts(selectedAttempts), [selectedAttempts])
+  const history = useMemo(() => toStateSpaceHistory(selectedAttempts), [selectedAttempts])
+  const observed = useMemo(() => toObservedPoints(selectedAttempts), [selectedAttempts])
   const latest = chronological[chronological.length - 1]
-  const bestRate = selectedAttempts.length
-    ? Math.max(...selectedAttempts.map(attempt => attempt.fluency_rate))
-    : 0
+  const plannedItems = latest
+    ? Math.max(1, Math.round(Number(latest.total_questions))) : 36
+  const elapsedDaysSinceLatest = latest
+    ? daysBetween(new Date(), new Date(latest.completed_at)) : 0
+  const firstSessionGapDays = elapsedDaysSinceLatest + practiceEveryDays
+  const nextForecast = useMemo(() => forecastNextAttempt(STATE_SPACE_BUNDLE, {
+    mode: selectedMode, history, nextGapDays: firstSessionGapDays, plannedItems,
+  }), [selectedMode, history, firstSessionGapDays, plannedItems])
+  const masteryForecast = useMemo(() => forecastMastery(STATE_SPACE_BUNDLE, {
+    mode: selectedMode,
+    history,
+    plannedItems,
+    practiceEveryDays,
+    firstSessionGapDays,
+    horizonSessions: 10,
+    trajectoriesPerDraw: 16,
+    consecutiveGoalSessions: 2,
+  }), [selectedMode, history, plannedItems, practiceEveryDays, firstSessionGapDays])
+  const bestRate = observed.length ? Math.max(...observed.map(point => point.rate)) : 0
 
-  if (loading) {
-    return (
-      <div className="bl-page bl-loading min-h-screen">
-        <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
-        <p className="bl-kicker">Loading performance record</p>
+  if (loading) return <div className="bl-page bl-loading min-h-screen">
+    <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
+    <p className="bl-kicker">Loading performance record</p>
+  </div>
+
+  return <div className="bl-page bl-progress-page">
+    <header className="bl-header bl-category-header">
+      <div className="bl-container bl-header-inner">
+        <Link href="/" className="bl-wordmark" aria-label="BehaviorLingo home">
+          <span className="bl-wordmark-mark">BL</span>
+          <span>behavior<span>lingo</span></span>
+        </Link>
+        <nav className="bl-progress-nav" aria-label="Progress navigation">
+          <Link href="/leaderboard">Leaderboard</Link><Link href="/">Home</Link>
+        </nav>
       </div>
-    )
-  }
+    </header>
 
-  return (
-    <div className="bl-page bl-progress-page">
-      <header className="bl-header bl-category-header">
-        <div className="bl-container bl-header-inner">
-          <Link href="/" className="bl-wordmark" aria-label="BehaviorLingo home">
-            <span className="bl-wordmark-mark">BL</span>
-            <span>behavior<span>lingo</span></span>
-          </Link>
-          <nav className="bl-progress-nav" aria-label="Progress navigation">
-            <Link href="/leaderboard">Leaderboard</Link>
-            <Link href="/">Home</Link>
-          </nav>
+    <main className="bl-container bl-progress-main">
+      <section className="bl-progress-intro">
+        <div><p className="bl-kicker">Performance record</p>
+          <h1>Your progress and mastery forecast.</h1>
+          <p>The model updates from this learner’s own timings and reports uncertainty rather than a fixed progress line.</p>
         </div>
-      </header>
+        {attempts.length > 0 && <label className="bl-pack-selector">
+          <span>Fluency pack</span>
+          <select value={selectedQuiz} onChange={event => setSelectedQuiz(event.target.value)}>
+            {quizzes.map(([id, quiz]) => <option key={id} value={id}>
+              {quiz.title} · {quiz.mode === 'typed' ? 'Typed' : 'Options'}
+            </option>)}
+          </select>
+        </label>}
+      </section>
 
-      <main className="bl-container bl-progress-main">
-        <section className="bl-progress-intro">
-          <div>
-            <p className="bl-kicker">Performance record</p>
-            <h1>Progress, modelled cautiously.</h1>
-            <p>Observed timings remain visible. The provisional model uses this learner’s eligible history to estimate how they would perform if they attempted the selected quiz now.</p>
+      {attempts.length === 0 ? <section className="bl-progress-empty">
+        <span>NO_TIMINGS_RECORDED</span>
+        <h2>Your performance record starts with a fluency timing.</h2>
+        <p>Complete a pack and its accuracy, rate and duration will appear here automatically.</p>
+        <button className="bl-button" onClick={() => router.push('/')}>
+          Choose a pack <span>→</span>
+        </button>
+      </section> : latest ? <>
+        <section className="bl-progress-summary" aria-label="Performance summary">
+          <div><span>Latest timing</span>
+            <strong>{Number(latest.fluency_rate).toFixed(1)}<small>/min</small></strong>
+            <p>{Number(latest.accuracy_percentage).toFixed(0)}% accuracy</p>
           </div>
-          {attempts.length > 0 && (
-            <label className="bl-pack-selector">
-              <span>Fluency pack</span>
-              <select value={selectedQuiz} onChange={event => setSelectedQuiz(event.target.value)}>
-                {quizzes.map(([id, quiz]) => (
-                  <option key={id} value={id}>{quiz.title} · {quiz.mode === 'typed' ? 'Typed' : 'Options'}</option>
-                ))}
-              </select>
-            </label>
-          )}
+          <div><span>Predicted next session</span>
+            <strong>{nextForecast.correctPerMinute.point.toFixed(1)}<small>/min</small></strong>
+            <p>{nextForecast.correctPerMinute.lower80.toFixed(1)}–{nextForecast.correctPerMinute.upper80.toFixed(1)}/min · 80% range</p>
+          </div>
+          <div className={nextForecast.accuracyProbability.point >= ACCURACY_AIM / 100
+            ? 'is-positive' : ''}>
+            <span>Predicted accuracy</span>
+            <strong>{(100 * nextForecast.accuracyProbability.point).toFixed(0)}<small>%</small></strong>
+            <p>{(100 * nextForecast.accuracyProbability.lower80).toFixed(0)}–{(100 * nextForecast.accuracyProbability.upper80).toFixed(0)}% · 80% range</p>
+          </div>
+          <div><span>Best observed</span>
+            <strong>{bestRate.toFixed(1)}<small>/min</small></strong>
+            <p>{observed.length} eligible timing{observed.length === 1 ? '' : 's'}</p>
+          </div>
         </section>
 
-        {attempts.length === 0 ? (
-          <section className="bl-progress-empty">
-            <span>NO_TIMINGS_RECORDED</span>
-            <h2>Your performance record starts with a fluency timing.</h2>
-            <p>Complete a pack and its accuracy, rate and duration will appear here automatically.</p>
-            <button className="bl-button" onClick={() => router.push('/')}>Choose a pack <span>→</span></button>
-          </section>
-        ) : model && latest ? (
-          <>
-            <section className="bl-progress-summary" aria-label="Performance summary">
-              <div>
-                <span>Latest timing</span>
-                <strong>{latest.fluency_rate.toFixed(1)}<small>/min</small></strong>
-                <p>{latest.accuracy_percentage.toFixed(0)}% accuracy</p>
-              </div>
-              <div>
-                <span>Predicted now</span>
-                <strong>{model.next.rate.toFixed(1)}<small>/min</small></strong>
-                <p>{model.predictive.rateLower80.toFixed(1)}–{model.predictive.rateUpper80.toFixed(1)}/min · 80% predictive interval</p>
-              </div>
-              <div className={model.next.accuracy >= ACCURACY_AIM ? 'is-positive' : ''}>
-                <span>Predicted accuracy now</span>
-                <strong>{model.next.accuracy.toFixed(0)}<small>%</small></strong>
-                <p>{model.predictive.accuracyLower80.toFixed(0)}–{model.predictive.accuracyUpper80.toFixed(0)}% · 80% predictive interval</p>
-              </div>
-              <div>
-                <span>Best observed</span>
-                <strong>{bestRate.toFixed(1)}<small>/min</small></strong>
-                <p>{selectedAttempts.length} timing{selectedAttempts.length === 1 ? '' : 's'} recorded</p>
-              </div>
-            </section>
+        <div className="bl-early-notice">
+          <strong>Forecast schedule</strong>
+          <span>Choose the intended interval between future practice sessions.</span>
+          <label className="bl-pack-selector"><span>Practice frequency</span>
+            <select value={practiceEveryDays}
+              onChange={event => setPracticeEveryDays(Number(event.target.value))}>
+              <option value={1}>Every day</option><option value={2}>Every 2 days</option>
+              <option value={3}>Every 3 days</option><option value={7}>Once a week</option>
+            </select>
+          </label>
+        </div>
 
-            <section className="bl-progress-summary bl-predictive-summary" aria-label="Posterior predictive goal probabilities">
-              <div className={model.predictive.probabilityAccuracyGoal >= 0.8 ? 'is-positive' : ''}>
-                <span>Accuracy aim next attempt</span>
-                <strong>{(100 * model.predictive.probabilityAccuracyGoal).toFixed(0)}<small>%</small></strong>
-                <p>Probability of accuracy ≥{ACCURACY_AIM}%</p>
-              </div>
-              <div className={model.predictive.probabilityFluencyGoal >= 0.8 ? 'is-positive' : ''}>
-                <span>Fluency aim next attempt</span>
-                <strong>{(100 * model.predictive.probabilityFluencyGoal).toFixed(0)}<small>%</small></strong>
-                <p>Probability of ≥{fluencyAim} correct/min</p>
-              </div>
-              <div className={model.predictive.probabilityJointGoal >= 0.8 ? 'is-positive' : ''}>
-                <span>Both aims next attempt</span>
-                <strong>{(100 * model.predictive.probabilityJointGoal).toFixed(0)}<small>%</small></strong>
-                <p>Posterior-predictive goal probability</p>
-              </div>
-              <div className={model.predictive.probabilitySustainedMasteryWithinFive >= 0.8 ? 'is-positive' : ''}>
-                <span>Sustained mastery within five</span>
-                <strong>{(100 * model.predictive.probabilitySustainedMasteryWithinFive).toFixed(0)}<small>%</small></strong>
-                <p>{model.predictive.medianAttemptsToSustainedMastery === null
-                  ? 'Not reached in the simulated horizon'
-                  : `Median ${model.predictive.medianAttemptsToSustainedMastery.toFixed(0)} attempts among successful sequences`}</p>
-              </div>
-            </section>
-            <div className="bl-early-notice">
-              <strong>Ten-session forecast</strong>
-              <span>The first session is modelled now and the following nine one day apart. Sustained mastery remains defined as meeting both aims on two consecutive attempts within the first five sessions.</span>
+        <BehaviorLingoMasteryCard forecast={masteryForecast} />
+
+        <section className="bl-trajectory-panel">
+          <div className="bl-panel-heading"><div>
+            <p className="bl-kicker">Fluency trajectory</p><h2>{selectedMeta?.title}</h2>
+          </div><div className="bl-model-state"><i />
+            <span>{history.length < 2 ? 'Limited history' : 'Personalised forecast'}</span>
+          </div></div>
+          <FluencyTrajectory observed={observed} forecast={nextForecast} aim={fluencyAim} />
+          <div className="bl-chart-key">
+            <span><i className="bl-key-point" />Observed timing</span>
+            <span><i className="bl-key-observed" />Observed path</span>
+            <span><i className="bl-key-dash" />Next-session prediction</span>
+            <span><i style={{ background: '#2f6f4e', opacity: 0.35 }} />80% predictive range</span>
+          </div>
+          {history.length < 2 && <div className="bl-early-notice">
+            <strong>Limited history</strong>
+            <span>Complete at least two timings on this pack before interpreting sessions to mastery. Until then, the population prior contributes most of the information.</span>
+          </div>}
+        </section>
+
+        <section className="bl-accuracy-panel">
+          <div className="bl-panel-heading bl-panel-heading-compact"><div>
+            <p className="bl-kicker">Accuracy check</p><h2>Accuracy across attempts</h2>
+          </div><span className="bl-accuracy-aim">Aim ≥{ACCURACY_AIM}%</span></div>
+          <AccuracyStrip observed={observed} />
+          <p className="bl-accuracy-note">Green timings meet the accuracy criterion. Mastery requires both accuracy and the mode-specific fluency aim.</p>
+        </section>
+
+        <section className="bl-history-panel">
+          <div className="bl-panel-heading bl-panel-heading-compact"><div>
+            <p className="bl-kicker">Timing log</p><h2>Recent attempts</h2>
+          </div></div>
+          <div className="bl-history-scroll"><table>
+            <thead><tr><th>Attempt</th><th>Date</th><th>Accuracy</th><th>Correct/min</th><th>Duration</th><th>Status</th></tr></thead>
+            <tbody>{chronological.slice().reverse().slice(0, 10).map((attempt, reverseIndex) => {
+              const attemptNumber = chronological.length - reverseIndex
+              const meetsAim = Number(attempt.accuracy_percentage) >= ACCURACY_AIM &&
+                Number(attempt.fluency_rate) >= fluencyAim
+              return <tr key={attempt.id}>
+                <td>A{String(attemptNumber).padStart(2, '0')}</td>
+                <td>{formatDate(attempt.completed_at)}</td>
+                <td>{Number(attempt.accuracy_percentage).toFixed(0)}%</td>
+                <td>{Number(attempt.fluency_rate).toFixed(1)}</td>
+                <td>{Number(attempt.total_time_minutes).toFixed(1)} min</td>
+                <td><span className={meetsAim ? 'is-met' : 'is-building'}>
+                  {meetsAim ? 'Aim met' : 'Building'}
+                </span></td>
+              </tr>
+            })}</tbody>
+          </table></div>
+        </section>
+
+        <section className="bl-technical-panel">
+          <button onClick={() => setShowTechnical(value => !value)}
+            aria-expanded={showTechnical}>
+            <span><b>Technical view</b><small>Model assumptions and validation</small></span>
+            <i>{showTechnical ? '−' : '+'}</i>
+          </button>
+          {showTechnical && <div className="bl-technical-content">
+            <div><span>Bayesian model</span>
+              <strong>Bivariate damped local-linear-trend state-space model</strong>
+              <p>The latent learner state tracks accuracy and log seconds per item together, including changing levels, trends, practice gaps and residual association.</p>
             </div>
-
-            <section className="bl-trajectory-panel">
-              <div className="bl-panel-heading">
-                <div>
-                  <p className="bl-kicker">Fluency trajectory</p>
-                  <h2>{selectedMeta?.title}</h2>
-                </div>
-                <div className="bl-model-state">
-                  <i />
-                  <span>{model.status === 'limited' ? 'Limited history' : 'Provisional estimate'}</span>
-                </div>
-              </div>
-
-              <FluencyTrajectory model={model} aim={fluencyAim} />
-
-              <div className="bl-chart-key">
-                <span><i className="bl-key-point" />Observed timing</span>
-                <span><i className="bl-key-observed" />Observed path</span>
-                <span><i className="bl-key-curve" />Personalised model fit</span>
-                <span><i style={{ background: '#9aaa83', opacity: 0.35 }} />80% credible band</span>
-                <span><i className="bl-key-dash" />Forecast median</span>
-                <span><i style={{ background: '#2f6f4e', opacity: 0.35 }} />80% predictive band</span>
-              </div>
-
-              {model.status === 'limited' && (
-                <div className="bl-early-notice">
-                  <strong>Limited history</strong>
-                  <span>This quiz has fewer than two previous attempts. The learner adjustment uses all eligible timings, but quiz-specific practice history remains limited.</span>
-                </div>
-              )}
-            </section>
-
-            <section className="bl-accuracy-panel">
-              <div className="bl-panel-heading bl-panel-heading-compact">
-                <div>
-                  <p className="bl-kicker">Accuracy check</p>
-                  <h2>Accuracy across attempts</h2>
-                </div>
-                <span className="bl-accuracy-aim">Aim ≥{ACCURACY_AIM}%</span>
-              </div>
-              <AccuracyStrip model={model} />
-              <p className="bl-accuracy-note">Green timings meet the accuracy criterion. Fluency is interpreted alongside accuracy to avoid rewarding fast guessing.</p>
-            </section>
-
-            <section className="bl-history-panel">
-              <div className="bl-panel-heading bl-panel-heading-compact">
-                <div><p className="bl-kicker">Timing log</p><h2>Recent attempts</h2></div>
-              </div>
-              <div className="bl-history-scroll">
-                <table>
-                  <thead><tr><th>Attempt</th><th>Date</th><th>Accuracy</th><th>Correct/min</th><th>Duration</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {chronological.slice().reverse().slice(0, 10).map((attempt, reverseIndex) => {
-                      const attemptNumber = chronological.length - reverseIndex
-                      const meetsAim = attempt.accuracy_percentage >= ACCURACY_AIM && attempt.fluency_rate >= fluencyAim
-                      return (
-                        <tr key={attempt.id}>
-                          <td>A{String(attemptNumber).padStart(2, '0')}</td>
-                          <td>{formatDate(attempt.completed_at)}</td>
-                          <td>{attempt.accuracy_percentage.toFixed(0)}%</td>
-                          <td>{attempt.fluency_rate.toFixed(1)}</td>
-                          <td>{attempt.total_time_minutes.toFixed(1)} min</td>
-                          <td><span className={meetsAim ? 'is-met' : 'is-building'}>{meetsAim ? 'Aim met' : 'Building'}</span></td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="bl-technical-panel">
-              <button onClick={() => setShowTechnical(value => !value)} aria-expanded={showTechnical}>
-                <span><b>Technical view</b><small>Model assumptions and celeration summary</small></span>
-                <i>{showTechnical ? '−' : '+'}</i>
-              </button>
-              {showTechnical && (
-                <div className="bl-technical-content">
-                  <div>
-                    <span>Bayesian model</span>
-                    <strong>Zero-inflated accuracy + skew-normal speed</strong>
-                    <p>Accuracy uses a zero-inflated beta-binomial model. Log seconds per item use a skew-normal model. Both include mode, log practice, prior-attempt and time-gap effects.</p>
-                  </div>
-                  <div>
-                    <span>Prediction target</span>
-                    <strong>If this quiz were attempted now</strong>
-                    <p>The elapsed time since the latest attempt is included. Intervals and goal probabilities describe possible next-attempt outcomes, not only uncertainty about the fitted mean.</p>
-                  </div>
-                  <div>
-                    <span>Identity handling</span>
-                    <strong>{model.personalised ? 'Current learner updated' : 'Population estimate'}</strong>
-                    <p>{model.personalised
-                      ? `${model.historyObservations} eligible timing${model.historyObservations === 1 ? '' : 's'} update the population prior. ${model.slopesActive ? 'Learner intercepts and practice slopes are active.' : 'With fewer than six timings, only shrunk learner intercepts are active.'}`
-                      : 'No eligible timing is available, so learner effects remain at the population prior.'}</p>
-                  </div>
-                  <div>
-                    <span>Quiz handling</span>
-                    <strong>{model.quizEffectUsed ? 'Known quiz effect used' : 'New quiz fallback'}</strong>
-                    <p>{model.quizEffectUsed ? 'The fitted quiz adjustment is included.' : 'This quiz was not in the training data, so its quiz effect is set to the population mean.'}</p>
-                  </div>
-                  <div>
-                    <span>Calendar celeration</span>
-                    <strong>{celeration ? `×${celeration.factorPerWeek.toFixed(2)} per week` : 'More days required'}</strong>
-                    <p>{celeration ? `Estimated from the first timing on each of ${celeration.days} practice days.` : 'At least two separate practice days are required for a calendar-time estimate.'}</p>
-                  </div>
-                  <div>
-                    <span>Uncertainty calculation</span>
-                    <strong>{POSTERIOR_BUNDLE.metadata.posterior_draws_exported} simulations per forecast session</strong>
-                    <p>The historical band is an 80% credible interval for expected performance. The future band is an 80% posterior-predictive interval for actual timings, including attempt-to-attempt variation. Population and quiz parameters use fitted posterior draws; learner effects use a penalised empirical-Bayes estimate with a local Gaussian approximation.</p>
-                  </div>
-                  <div>
-                    <span>Deployment status</span>
-                    <strong>Provisional predictive display</strong>
-                    <p>{MODEL_VERSION}. Predictive intervals and probabilities are now displayed, but they should remain labelled provisional until their coverage and goal calibration have been checked on future attempts.</p>
-                  </div>
-                </div>
-              )}
-            </section>
-          </>
-        ) : null}
-      </main>
-    </div>
-  )
+            <div><span>Personalisation</span>
+              <strong>{history.length} eligible timing{history.length === 1 ? '' : 's'} on this pack</strong>
+              <p>Each timing updates the learner’s filtered latent state. New learners begin at the fitted population distribution.</p>
+            </div>
+            <div><span>Mastery definition</span><strong>Both aims in two consecutive sessions</strong>
+              <p>Accuracy ≥{ACCURACY_AIM}% and fluency ≥{fluencyAim}/min must occur twice consecutively. First passage is simulated across ten future sessions.</p>
+            </div>
+            <div><span>Uncertainty</span>
+              <strong>{masteryForecast.simulatedTrajectories} predictive trajectories</strong>
+              <p>The calculation propagates uncertainty in the learner state, fitted population parameters, future learning, accuracy and speed.</p>
+            </div>
+            <div><span>Numerical validation</span><strong>R and TypeScript matched</strong>
+              <p>All five golden scenarios matched the offline R reference within 1e-7 tolerance.</p>
+            </div>
+            <div><span>Interpretation</span><strong>Forecast, not a guarantee</strong>
+              <p>Results assume the selected practice schedule. Typed-mode estimates remain tentative because the historical typed sample is small.</p>
+            </div>
+          </div>}
+        </section>
+      </> : null}
+    </main>
+  </div>
 }
