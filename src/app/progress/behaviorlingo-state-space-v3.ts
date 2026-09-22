@@ -140,6 +140,37 @@ export interface MasteryForecast {
   curve: MasteryProbabilityPoint[];
 }
 
+export interface CapabilityTrajectoryRequest {
+  mode: ResponseMode;
+  history: AttemptObservation[];
+  /** Evenly spaced practice sessions per day. Allowed values: 1, 2 or 3. */
+  sessionsPerDay: 1 | 2 | 3;
+  /** Elapsed gap from the latest observation to now. */
+  elapsedDaysSinceLatest: number;
+  /** Calendar forecast horizon. Default 10 days. */
+  horizonDays?: number;
+  /** Simulated latent trajectories per posterior draw. Default 16. */
+  trajectoriesPerDraw?: number;
+}
+
+export interface CapabilityTrajectoryPoint {
+  day: number;
+  medianCorrectPerMinute: number;
+  lower80CorrectPerMinute: number;
+  upper80CorrectPerMinute: number;
+  medianAccuracy: number;
+  lower80Accuracy: number;
+  upper80Accuracy: number;
+}
+
+export interface CapabilityTrajectoryForecast {
+  mode: ResponseMode;
+  sessionsPerDay: number;
+  horizonDays: number;
+  simulatedTrajectories: number;
+  points: CapabilityTrajectoryPoint[];
+}
+
 export interface DrawForecastDebug {
   drawId: number;
   filteredMean: number[];
@@ -748,6 +779,130 @@ export function forecastNextAttempt(
 }
 
 /**
+ * Returns the same deterministic posterior-predictive fluency draws used by
+ * forecastNextAttempt. Intended for displaying a density/half-eye without
+ * pretending that probability is uniform across an interval.
+ */
+export function forecastNextAttemptFluencySamples(
+  bundle: StateSpacePosteriorBundleV3,
+  request: ForecastRequest,
+): number[] {
+  validateStateSpaceBundle(bundle);
+  validateRequest(request);
+  const samplesPerDraw = request.predictiveSamplesPerDraw ?? 32;
+  if (!Number.isInteger(samplesPerDraw) || samplesPerDraw < 1 || samplesPerDraw > 256) {
+    throw new Error("predictiveSamplesPerDraw must be an integer from 1 to 256.");
+  }
+  const samples: number[] = [];
+  bundle.draws.forEach((draw, drawIndex) => {
+    const prediction = predictDraw(draw, request);
+    for (let sampleIndex = 1; sampleIndex <= samplesPerDraw; sampleIndex += 1) {
+      const globalIndex = drawIndex * samplesPerDraw + sampleIndex;
+      const sample = sampleBivariateNormal(
+        prediction.observationMean,
+        prediction.predictiveCovariance,
+        globalIndex,
+      );
+      const accuracy = logistic(sample[0]);
+      const seconds = Math.exp(sample[1]);
+      samples.push((60 * accuracy) / seconds);
+    }
+  });
+  return samples;
+}
+
+/**
+ * Forecasts the learner's latent capability, rather than the noisy outcome of
+ * one attempt, at the end of each future calendar day.
+ */
+export function forecastCapabilityTrajectory(
+  bundle: StateSpacePosteriorBundleV3,
+  request: CapabilityTrajectoryRequest,
+): CapabilityTrajectoryForecast {
+  validateStateSpaceBundle(bundle);
+  if (![1, 2, 3].includes(request.sessionsPerDay)) {
+    throw new Error("sessionsPerDay must be 1, 2 or 3.");
+  }
+  assertFinite(request.elapsedDaysSinceLatest, "elapsedDaysSinceLatest");
+  if (request.elapsedDaysSinceLatest < 0 || request.elapsedDaysSinceLatest > 3650) {
+    throw new Error("elapsedDaysSinceLatest must be from 0 to 3650.");
+  }
+  const horizonDays = request.horizonDays ?? 10;
+  const trajectoriesPerDraw = request.trajectoriesPerDraw ?? 16;
+  if (!Number.isInteger(horizonDays) || horizonDays < 1 || horizonDays > 30) {
+    throw new Error("horizonDays must be an integer from 1 to 30.");
+  }
+  if (!Number.isInteger(trajectoriesPerDraw) || trajectoriesPerDraw < 4 || trajectoriesPerDraw > 128) {
+    throw new Error("trajectoriesPerDraw must be an integer from 4 to 128.");
+  }
+
+  const totalPaths = bundle.draws.length * trajectoriesPerDraw;
+  const gapBetweenSessions = 1 / request.sessionsPerDay;
+  const totalSessions = horizonDays * request.sessionsPerDay;
+  const accuracyByDay = Array.from({ length: horizonDays + 1 }, () => [] as number[]);
+  const fluencyByDay = Array.from({ length: horizonDays + 1 }, () => [] as number[]);
+  const stateBases = [2, 3, 5, 7];
+
+  bundle.draws.forEach((draw, drawIndex) => {
+    const parameters = prepareParameters(draw, request.mode);
+    const filtered = filterHistory(request.history, parameters);
+    for (let trajectoryIndex = 0; trajectoryIndex < trajectoriesPerDraw; trajectoryIndex += 1) {
+      const pathIndex = drawIndex * trajectoriesPerDraw + trajectoryIndex + 1;
+      let latentState = sampleMultivariateNormal(
+        filtered.mean,
+        filtered.covariance,
+        quasiNormalVector(pathIndex, stateBases),
+      );
+
+      const recordDay = (day: number) => {
+        const observationMean = multiplyMatrixVector(parameters.observation, latentState);
+        const accuracy = logistic(observationMean[0]);
+        const seconds = Math.exp(observationMean[1]);
+        accuracyByDay[day].push(accuracy);
+        fluencyByDay[day].push((60 * accuracy) / seconds);
+      };
+      recordDay(0);
+
+      for (let session = 1; session <= totalSessions; session += 1) {
+        const firstGap = request.elapsedDaysSinceLatest + gapBetweenSessions;
+        const gapDays = session === 1 ? firstGap : gapBetweenSessions;
+        const processIndex = pathIndex + session * totalPaths;
+        const processStandardNormals = quasiNormalVector(processIndex, stateBases);
+        const processNoise = parameters.processCovariance.map(
+          (row, index) => Math.sqrt(row[index]) * processStandardNormals[index],
+        );
+        latentState = addVectors(
+          addVectors(
+            multiplyMatrixVector(parameters.transition, latentState),
+            scaleVector(parameters.gapStateEffect, Math.log1p(gapDays)),
+          ),
+          processNoise,
+        );
+        if (session % request.sessionsPerDay === 0) {
+          recordDay(session / request.sessionsPerDay);
+        }
+      }
+    }
+  });
+
+  return {
+    mode: request.mode,
+    sessionsPerDay: request.sessionsPerDay,
+    horizonDays,
+    simulatedTrajectories: totalPaths,
+    points: Array.from({ length: horizonDays + 1 }, (_, day) => ({
+      day,
+      medianCorrectPerMinute: quantile(fluencyByDay[day], 0.5),
+      lower80CorrectPerMinute: quantile(fluencyByDay[day], 0.1),
+      upper80CorrectPerMinute: quantile(fluencyByDay[day], 0.9),
+      medianAccuracy: quantile(accuracyByDay[day], 0.5),
+      lower80Accuracy: quantile(accuracyByDay[day], 0.1),
+      upper80Accuracy: quantile(accuracyByDay[day], 0.9),
+    })),
+  };
+}
+
+/**
  * Simulates first passage to mastery from the learner's current filtered state.
  * Mastery is a run of 1–3 consecutive future/observed sessions satisfying both
  * the accuracy and mode-specific fluency criteria. The default is two.
@@ -915,9 +1070,13 @@ export function forecastMastery(
     rangeLabel,
     practiceAssumption: request.practiceEveryDays === 0
       ? "Assuming another session the same day"
-      : request.practiceEveryDays === 1
-        ? "Assuming practice every day"
-        : `Assuming practice every ${request.practiceEveryDays} days`,
+      : Math.abs(request.practiceEveryDays - 1 / 3) < 1e-9
+        ? "Assuming three practice sessions per day"
+        : Math.abs(request.practiceEveryDays - 1 / 2) < 1e-9
+          ? "Assuming two practice sessions per day"
+          : request.practiceEveryDays === 1
+            ? "Assuming practice every day"
+            : `Assuming practice every ${request.practiceEveryDays} days`,
     caution: request.mode === "typed"
       ? "Typed-mode forecasts are based on limited historical data and should be treated cautiously."
       : null,

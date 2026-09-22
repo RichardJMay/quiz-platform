@@ -12,14 +12,23 @@ function percentage(probability: number): string {
   }).format(probability);
 }
 
+function compactNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 function daysLabel(forecast: MasteryForecast): string | null {
   const days = forecast.estimatedDaysToMastery;
   if (days.median === null || days.median === 0) return null;
   const upper = days.upper80Censored
-    ? `${forecast.horizonSessions * (days.median / (forecast.estimatedSessionsToMastery.median ?? 1))}+`
+    ? `${compactNumber(forecast.horizonSessions * (days.median / (forecast.estimatedSessionsToMastery.median ?? 1)))}+`
     : days.upper80;
-  if (days.lower80 === null || upper === null) return `About ${days.median} days`;
-  return `About ${days.median} days (80% range ${days.lower80}–${upper})`;
+  if (days.lower80 === null || upper === null) {
+    return `About ${compactNumber(days.median)} days`;
+  }
+  const upperLabel = typeof upper === "number" ? compactNumber(upper) : upper;
+  return `About ${compactNumber(days.median)} days (80% range ${compactNumber(days.lower80)}–${upperLabel})`;
 }
 
 export function BehaviorLingoMasteryCard({
