@@ -1605,6 +1605,47 @@ a:focus-visible {
   line-height: 1.55;
 }
 
+.bl-help-tools {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--bl-line);
+}
+
+.bl-help-choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin-top: 12px;
+}
+
+.bl-help-choices p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--bl-ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.bl-help-choices .bl-hint-panel {
+  flex-basis: 100%;
+  margin-top: 0;
+}
+
+.bl-letter-prompt {
+  margin-top: 12px;
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+  color: var(--bl-ink);
+  background: var(--bl-lcd-light);
+  border-left: 4px solid var(--bl-moss);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: clamp(0.9rem, 2.6vw, 1.2rem);
+  letter-spacing: 0.08em;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
 .bl-option-bank {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1755,6 +1796,10 @@ a:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--bl-ink);
+}
+
+.bl-result-grid.is-accuracy {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .bl-result-cell {
@@ -1946,17 +1991,36 @@ a:focus-visible {
   line-height: 0.9;
 }
 
-.bl-progress-intro > div > p:last-child {
-  max-width: 680px;
+.bl-progress-rules {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+}
+
+.bl-progress-rules p {
   margin: 0;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  background: var(--bl-lcd-light);
+  border-left: 3px solid var(--bl-moss);
   color: var(--bl-ink-soft);
-  font-size: 0.94rem;
-  line-height: 1.65;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.bl-progress-rules strong {
+  min-width: 112px;
+  color: var(--bl-forest-deep);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.7rem;
 }
 
 .bl-pack-selector {
   display: grid;
   gap: 9px;
+  min-width: 0;
 }
 
 .bl-pack-selector > span {
@@ -1968,20 +2032,75 @@ a:focus-visible {
   text-transform: uppercase;
 }
 
-.bl-pack-selector select {
+.bl-pack-selector details {
+  position: relative;
+  min-width: 0;
+}
+
+.bl-pack-selector summary {
   width: 100%;
   min-height: 52px;
-  padding: 0 42px 0 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   color: var(--bl-ink);
   background: var(--bl-white);
   border: 1px solid var(--bl-ink);
-  border-radius: 0;
-  outline: none;
   font-family: var(--font-geist-mono), monospace;
   font-size: 0.74rem;
+  cursor: pointer;
+  list-style: none;
 }
 
-.bl-pack-selector select:focus {
+.bl-pack-selector summary::-webkit-details-marker {
+  display: none;
+}
+
+.bl-pack-selector summary > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bl-pack-selector-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 3px);
+  right: 0;
+  left: 0;
+  max-height: min(360px, 45vh);
+  overflow-y: auto;
+  background: var(--bl-white);
+  border: 1px solid var(--bl-ink);
+  box-shadow: 5px 5px 0 rgba(21, 34, 25, 0.14);
+}
+
+.bl-pack-selector-menu button {
+  width: 100%;
+  padding: 12px 14px;
+  display: block;
+  color: var(--bl-ink);
+  background: var(--bl-white);
+  border: 0;
+  border-bottom: 1px solid var(--bl-line);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bl-pack-selector-menu button:hover,
+.bl-pack-selector-menu button:focus-visible,
+.bl-pack-selector-menu button[aria-current="true"] {
+  background: var(--bl-lcd-light);
+}
+
+.bl-pack-selector summary:focus-visible {
+  outline: 2px solid var(--bl-forest);
+  outline-offset: 2px;
   box-shadow: 4px 4px 0 var(--bl-lcd);
 }
 
@@ -2088,6 +2207,35 @@ a:focus-visible {
 .bl-trajectory-panel {
   padding: clamp(22px, 4vw, 42px);
   box-shadow: 7px 7px 0 rgba(21, 34, 25, 0.14);
+}
+
+.bl-fluency-locked {
+  min-height: clamp(260px, 38vw, 450px);
+  margin-top: 30px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  color: var(--bl-ink-soft);
+  background: var(--bl-paper);
+  border: 1px solid var(--bl-line);
+  text-align: center;
+}
+
+.bl-fluency-locked svg {
+  width: 64px;
+  height: 64px;
+  color: var(--bl-forest);
+}
+
+.bl-fluency-locked p {
+  max-width: 520px;
+  margin: 0;
+  font-size: clamp(1rem, 2vw, 1.3rem);
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .bl-panel-heading {
@@ -2229,6 +2377,56 @@ a:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 22px;
+}
+
+.bl-chart-note {
+  margin: 14px 0 0;
+  color: var(--bl-ink-soft);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.bl-celeration {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  color: var(--bl-forest-deep);
+  background: var(--bl-lcd-light);
+  border-left: 4px solid var(--bl-forest);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.76rem;
+  line-height: 1.6;
+}
+
+.bl-daily-summary {
+  margin-top: 24px;
+  border-top: 1px solid var(--bl-line);
+}
+
+.bl-daily-summary h3 {
+  margin: 18px 0 10px;
+  color: var(--bl-ink);
+  font-size: 0.95rem;
+}
+
+.bl-daily-summary table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.72rem;
+  text-align: left;
+}
+
+.bl-daily-summary th,
+.bl-daily-summary td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--bl-line);
+  white-space: nowrap;
+}
+
+.bl-daily-summary th {
+  color: var(--bl-moss);
+  font-size: 0.62rem;
+  text-transform: uppercase;
 }
 
 .bl-chart-key > span {
@@ -3102,7 +3300,7 @@ a:focus-visible {
     font-size: clamp(2.65rem, 13vw, 4.2rem);
   }
 
-  .bl-progress-intro > div > p:last-child {
+  .bl-progress-rules p {
     font-size: 0.83rem;
   }
 
@@ -3325,6 +3523,11 @@ a:focus-visible {
   .bl-result-cell:last-child {
     grid-column: 1 / -1;
     border-top: 1px solid var(--bl-ink);
+  }
+
+  .bl-result-grid.is-accuracy .bl-result-cell:last-child {
+    grid-column: auto;
+    border-top: 0;
   }
 
   .bl-analysis-panel {

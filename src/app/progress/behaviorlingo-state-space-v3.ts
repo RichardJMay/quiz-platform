@@ -49,6 +49,17 @@ export interface AttemptObservation {
   gapDays: number;
 }
 
+export interface ObservedFluencyState {
+  median: number;
+  lower80: number;
+  upper80: number;
+}
+
+export interface ObservedFluencyTrajectory {
+  points: ObservedFluencyState[];
+  weeklyFactor: Interval80 | null;
+}
+
 export interface ForecastRequest {
   mode: ResponseMode;
   history: AttemptObservation[];
@@ -575,6 +586,64 @@ function filterHistory(
     );
   });
   return state;
+}
+
+/** Filtered latent rate after each recorded daily probe, over observed dates only. */
+export function filterObservedFluency(
+  bundle: StateSpacePosteriorBundleV3,
+  mode: ResponseMode,
+  history: AttemptObservation[],
+  elapsedDays: number[],
+): ObservedFluencyTrajectory {
+  validateStateSpaceBundle(bundle);
+  if (history.length !== elapsedDays.length) throw new Error('One calendar day is required per observation.');
+  if (history.length === 0) return { points: [], weeklyFactor: null };
+  const rates = history.map(() => [] as number[]);
+  const weeklyFactors: number[] = [];
+
+  bundle.draws.forEach((draw, drawIndex) => {
+    const parameters = prepareParameters(draw, mode);
+    let state: FilterState = {
+      mean: cloneVector(parameters.initialMean),
+      covariance: cloneMatrix(parameters.initialCovariance),
+    };
+    const drawRates: number[] = [];
+    history.forEach((attempt, index) => {
+      assertFinite(attempt.secondsPerItem, 'secondsPerItem');
+      if (!(attempt.secondsPerItem > 0) || attempt.gapDays < 0) throw new Error('Invalid timing.');
+      if (index > 0) state = transitionState(state, Math.log1p(attempt.gapDays), parameters);
+      const accuracy = accuracyObservation(attempt);
+      state = updateState(state, [accuracy.value, Math.log(attempt.secondsPerItem)], accuracy.variance, parameters);
+      const latent = Math.max(1e-9, 60 * logistic(state.mean[0]) / Math.exp(state.mean[2]));
+      drawRates.push(latent);
+      for (let sample = 0; sample < 4; sample++) {
+        const z = quasiNormalVector(1 + drawIndex * 4 + sample, [2, 3, 5, 7]);
+        const sampled = sampleMultivariateNormal(state.mean, state.covariance, z);
+        const rate = 60 * logistic(sampled[0]) / Math.exp(sampled[2]);
+        rates[index].push(Number.isFinite(rate) && rate > 0 ? rate : latent);
+      }
+    });
+    if (history.length >= 2 && elapsedDays[0] !== elapsedDays[elapsedDays.length - 1]) {
+      const meanX = elapsedDays.reduce((sum, x) => sum + x, 0) / elapsedDays.length;
+      const meanY = drawRates.reduce((sum, value) => sum + Math.log(value), 0) / drawRates.length;
+      const numerator = elapsedDays.reduce((sum, x, index) => sum + (x - meanX) * (Math.log(drawRates[index]) - meanY), 0);
+      const denominator = elapsedDays.reduce((sum, x) => sum + (x - meanX) ** 2, 0);
+      weeklyFactors.push(Math.exp(7 * numerator / denominator));
+    }
+  });
+
+  const interval = (values: number[]): Interval80 => ({
+    point: discreteQuantile(values, 0.5),
+    lower80: discreteQuantile(values, 0.1),
+    upper80: discreteQuantile(values, 0.9),
+  });
+  return {
+    points: rates.map(values => {
+      const summary = interval(values);
+      return { median: summary.point, lower80: summary.lower80, upper80: summary.upper80 };
+    }),
+    weeklyFactor: weeklyFactors.length ? interval(weeklyFactors) : null,
+  };
 }
 
 function predictDraw(

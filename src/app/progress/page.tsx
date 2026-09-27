@@ -1,36 +1,26 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import stateSpaceBundleJson from './behaviorlingo_state_space_posterior_bundle_v3.json'
+import { AccuracyByAttempt, CumulativeRecord } from './PathwayCharts'
+import { completedAttempts, cumulativeRecord, dayKey, fluencyPoints, type ProgressAttempt } from './progress-records'
+import { recognisesEarlierTimings } from '@/lib/learning-stage'
 import {
   forecastNextAttempt,
-  forecastNextAttemptFluencySamples,
+  filterObservedFluency,
   type AttemptObservation,
-  type NextAttemptForecast,
+  type ObservedFluencyTrajectory,
   type StateSpacePosteriorBundleV3,
 } from './behaviorlingo-state-space-v3'
 
 type ResponseMode = 'options' | 'typed'
 
-interface QuizAttempt {
-  id: string
-  quiz_id: string
+interface QuizAttempt extends ProgressAttempt {
   student_name: string
-  total_questions: number
-  correct_answers: number
-  accuracy_percentage: number
-  fluency_rate: number
-  total_time_minutes: number
-  completed_at: string
-  quizzes: {
-    title: string
-    description: string
-    response_mode: ResponseMode | null
-  } | null
 }
 
 interface ObservedPoint {
@@ -38,6 +28,7 @@ interface ObservedPoint {
   rate: number
   accuracy: number
   date: string
+  dailyProbe: boolean
 }
 
 const STATE_SPACE_BUNDLE =
@@ -49,17 +40,15 @@ const EXCLUDED_ATTEMPT_IDS = new Set([
   '163bbf23-690b-4530-961d-c1d2edb702b2',
 ])
 
-const clamp = (value: number, minimum: number, maximum: number) =>
-  Math.min(maximum, Math.max(minimum, value))
 const daysBetween = (later: Date, earlier: Date) =>
   Math.max(0, (later.getTime() - earlier.getTime()) / 86_400_000)
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
+    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
   }).format(new Date(value))
 
 function eligibleAttempts(attempts: QuizAttempt[]): QuizAttempt[] {
-  return attempts
+  return fluencyPoints(attempts).filter(point => point.dailyProbe).map(point => point.attempt as QuizAttempt)
     .filter(attempt => {
       const questions = Number(attempt.total_questions)
       const correct = Number(attempt.correct_answers)
@@ -93,131 +82,112 @@ function toStateSpaceHistory(attempts: QuizAttempt[]): AttemptObservation[] {
 }
 
 function toObservedPoints(attempts: QuizAttempt[]): ObservedPoint[] {
-  return eligibleAttempts(attempts).map((attempt, index) => ({
+  return fluencyPoints(attempts).filter(point => !EXCLUDED_ATTEMPT_IDS.has(point.attempt.id)).map(({ attempt, dailyProbe }, index) => ({
     attempt: index + 1,
     rate: Math.max(0, Number(attempt.fluency_rate) || 0),
     accuracy: Number(attempt.accuracy_percentage) || 0,
-    date: attempt.completed_at,
+    date: dayKey(attempt),
+    dailyProbe,
   }))
 }
 
-function FluencyTrajectory({
-  observed,
-  forecast,
-  fluencySamples,
-  aim,
-}: {
+function FluencyTrajectory({ observed, filtered, aim }: {
   observed: ObservedPoint[]
-  forecast: NextAttemptForecast
-  fluencySamples: number[]
+  filtered: ObservedFluencyTrajectory
   aim: number
 }) {
+  if (observed.length === 0) return <p>No timed attempts on this pack yet.</p>
   const width = 920
-  const height = 470
-  const margin = { top: 34, right: 34, bottom: 64, left: 76 }
+  const height = 450
+  const margin = { top: 32, right: 38, bottom: 67, left: 76 }
   const plotWidth = width - margin.left - margin.right
   const plotHeight = height - margin.top - margin.bottom
-  const predictedAttempt = observed.length + 1
-  const finalAttempt = Math.max(2, predictedAttempt)
-  const yMaximumRaw = Math.max(
-    aim * 1.35,
-    ...observed.map(point => point.rate * 1.15),
-    forecast.correctPerMinute.upper80 * 1.08,
-  )
-  const yMaximum = Math.max(5, Math.ceil(yMaximumRaw / 5) * 5)
-  const xAt = (attempt: number) => margin.left +
-    ((attempt - 1) / Math.max(1, finalAttempt - 1)) * plotWidth
-  const yAt = (rate: number) => margin.top + plotHeight -
-    (clamp(rate, 0, yMaximum) / yMaximum) * plotHeight
-  const observedPath = observed
-    .map(point => `${xAt(point.attempt)},${yAt(point.rate)}`).join(' ')
-  const yTicks = Array.from({ length: 6 }, (_, index) => yMaximum / 5 * index)
-  const xTicks = Array.from({ length: finalAttempt }, (_, index) => index + 1)
-    .filter(value => finalAttempt <= 16 || value === 1 || value === finalAttempt || value % 2 === 0)
-  const predictionX = xAt(predictedAttempt)
-  const pointY = yAt(forecast.correctPerMinute.point)
-  const lowerY = yAt(forecast.correctPerMinute.lower80)
-  const upperY = yAt(forecast.correctPerMinute.upper80)
-  const densityValues = fluencySamples.filter(Number.isFinite).sort((a, b) => a - b)
-  const densityLower = densityValues[Math.floor(0.005 * (densityValues.length - 1))] ?? 0
-  const densityUpper = densityValues[Math.ceil(0.995 * (densityValues.length - 1))] ?? yMaximum
-  const densityMean = densityValues.reduce((sum, value) => sum + value, 0) /
-    Math.max(1, densityValues.length)
-  const densitySd = Math.sqrt(densityValues.reduce(
-    (sum, value) => sum + (value - densityMean) ** 2, 0,
-  ) / Math.max(1, densityValues.length - 1))
-  const bandwidth = Math.max(
-    0.05,
-    1.06 * densitySd * Math.max(1, densityValues.length) ** -0.2,
-  )
-  const densityGrid = Array.from({ length: 81 }, (_, index) =>
-    densityLower + index / 80 * Math.max(0.001, densityUpper - densityLower))
-  const density = densityGrid.map(value => densityValues.reduce(
-    (sum, sample) => {
-      const z = (value - sample) / bandwidth
-      return sum + Math.exp(-0.5 * z * z)
-    }, 0) / (Math.max(1, densityValues.length) * bandwidth * Math.sqrt(2 * Math.PI)))
-  const maximumDensity = Math.max(...density, 1e-12)
-  const eyeWidth = Math.min(62, plotWidth / Math.max(3, finalAttempt) * 0.78)
-  const halfEyePath = [
-    `M ${predictionX},${yAt(densityGrid[0] ?? 0)}`,
-    ...densityGrid.map((value, index) =>
-      `L ${predictionX - eyeWidth * density[index] / maximumDensity},${yAt(value)}`),
-    `L ${predictionX},${yAt(densityGrid[densityGrid.length - 1] ?? 0)} Z`,
-  ].join(' ')
+  const dayMillis = (date: string) => new Date(`${date.slice(0, 10)}T12:00:00Z`).getTime()
+  const first = dayMillis(observed[0].date)
+  const last = dayMillis(observed[observed.length - 1].date)
+  const span = Math.max(86_400_000, last - first)
+  const xAt = (date: string) => margin.left + (dayMillis(date) - first) / span * plotWidth
+  const floor = 0.5
+  const ceiling = Math.max(aim * 2, ...observed.map(point => point.rate),
+    ...filtered.points.map(point => point.upper80), 2)
+  const maxRate = 2 ** Math.ceil(Math.log2(ceiling))
+  const yAt = (value: number) => margin.top + plotHeight *
+    (1 - Math.log2(Math.max(floor, value) / floor) / Math.log2(maxRate / floor))
+  const probes = observed.filter(point => point.dailyProbe)
+  const trajectory = probes.slice(0, filtered.points.length)
+  const upper = trajectory.map((point, index) => `${xAt(point.date)},${yAt(filtered.points[index].upper80)}`)
+  const lower = trajectory.map((point, index) => `${xAt(point.date)},${yAt(filtered.points[index].lower80)}`).reverse()
+  const band = [...upper, ...lower].join(' ')
+  const median = trajectory.map((point, index) => `${xAt(point.date)},${yAt(filtered.points[index].median)}`).join(' ')
+  const yTicks: number[] = []
+  for (let rate = floor; rate <= maxRate; rate *= 2) yTicks.push(rate)
+  const xDates = [observed[0].date, observed[Math.floor((observed.length - 1) / 2)].date, observed[observed.length - 1].date]
+    .filter((date, index, dates) => dates.findIndex(item => item.slice(0, 10) === date.slice(0, 10)) === index)
+  return <div className="bl-trajectory-scroll"><svg viewBox={`0 0 ${width} ${height}`} className="bl-trajectory-chart"
+    role="img" aria-label="Timed responses per minute by day on a logarithmic axis, with modelled fluency and an 80 percent credible band">
+    <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} fill="#f4f1df" stroke="#152219" />
+    {yTicks.map(tick => <g key={tick}>
+      <line x1={margin.left} y1={yAt(tick)} x2={width - margin.right} y2={yAt(tick)} stroke="#9aaa83" strokeWidth="0.7" />
+      <text x={margin.left - 11} y={yAt(tick) + 4} textAnchor="end" className="bl-chart-tick">{tick}/min</text>
+    </g>)}
+    <line x1={margin.left} y1={yAt(aim)} x2={width - margin.right} y2={yAt(aim)} className="bl-aim-line" />
+    <text x={width - margin.right - 5} y={yAt(aim) - 9} textAnchor="end" className="bl-aim-label">Aim {aim}/min</text>
+    {trajectory.length > 1 && <polygon points={band} fill="#2f6f4e" opacity="0.19" />}
+    {trajectory.length === 1 && <line x1={xAt(trajectory[0].date)} y1={yAt(filtered.points[0].lower80)}
+      x2={xAt(trajectory[0].date)} y2={yAt(filtered.points[0].upper80)} stroke="#2f6f4e" strokeWidth="5" opacity="0.38" />}
+    {trajectory.length > 1 && <polyline points={median} fill="none" stroke="#2f6f4e" strokeWidth="3" />}
+    {observed.map(point => <circle key={point.attempt} cx={xAt(point.date)} cy={yAt(point.rate)}
+      r={point.dailyProbe ? 6 : 4} fill={point.dailyProbe ? '#152219' : '#758077'}
+      opacity={point.dailyProbe ? 1 : 0.35} stroke="#f4f1df" strokeWidth="1.5">
+      <title>{`${point.dailyProbe ? 'Daily probe' : 'Later timing'} · ${point.rate.toFixed(1)}/min · ${point.accuracy.toFixed(0)}% · ${formatDate(point.date)}`}</title>
+    </circle>)}
+    {xDates.map(date => <text key={date} x={xAt(date)} y={height - 31} textAnchor="middle" className="bl-chart-tick">{formatDate(date)}</text>)}
+    <text x={margin.left + plotWidth / 2} y={height - 8} textAnchor="middle" className="bl-chart-axis">Calendar day</text>
+    <text x="20" y={margin.top + plotHeight / 2} textAnchor="middle"
+      transform={`rotate(-90 20 ${margin.top + plotHeight / 2})`} className="bl-chart-axis">Correct/min · ratio scale</text>
+  </svg></div>
+}
 
-  return (
-    <div className="bl-trajectory-scroll">
-      <svg viewBox={`0 0 ${width} ${height}`} className="bl-trajectory-chart"
-        role="img" aria-label="Observed fluency timings and state-space prediction for the next session">
-        <defs>
-          <pattern id="bl-chart-grid" width="12" height="12" patternUnits="userSpaceOnUse">
-            <path d="M 12 0 L 0 0 0 12" fill="none" stroke="#9aaa83" strokeWidth="0.35" opacity="0.28" />
-          </pattern>
-        </defs>
-        <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight}
-          fill="url(#bl-chart-grid)" stroke="#152219" />
-        {yTicks.map(tick => <g key={tick}>
-          <line x1={margin.left} y1={yAt(tick)} x2={width - margin.right} y2={yAt(tick)}
-            stroke="#9aaa83" strokeWidth="0.7" opacity="0.55" />
-          <text x={margin.left - 14} y={yAt(tick) + 4} textAnchor="end"
-            className="bl-chart-tick">{tick.toFixed(0)}</text>
-        </g>)}
-        {xTicks.map(attempt => <g key={attempt}>
-          <line x1={xAt(attempt)} y1={margin.top + plotHeight} x2={xAt(attempt)}
-            y2={margin.top + plotHeight + 7} stroke="#152219" />
-          <text x={xAt(attempt)} y={margin.top + plotHeight + 25} textAnchor="middle"
-            className="bl-chart-tick">{attempt}</text>
-        </g>)}
-        <line x1={margin.left} y1={yAt(aim)} x2={width - margin.right} y2={yAt(aim)}
-          className="bl-aim-line" />
-        <text x={width - margin.right - 5} y={yAt(aim) - 9} textAnchor="end"
-          className="bl-aim-label">Aim {aim}/min</text>
-        {observed.length > 1 && <polyline points={observedPath} className="bl-observed-path" />}
-        <path d={halfEyePath} fill="#2f6f4e" opacity="0.32" stroke="#2f6f4e" strokeWidth="1.5">
-          <title>Posterior predictive density if attempted now</title>
-        </path>
-        <line x1={predictionX} y1={upperY} x2={predictionX} y2={lowerY}
-          stroke="#2f6f4e" strokeWidth="2.5">
-          <title>80% posterior-predictive interval</title>
-        </line>
-        <circle cx={predictionX} cy={pointY} r="6" fill="#152219" stroke="#f4f1df" strokeWidth="2">
-          <title>{`Median if attempted now: ${forecast.correctPerMinute.point.toFixed(1)}/min (${forecast.correctPerMinute.lower80.toFixed(1)}–${forecast.correctPerMinute.upper80.toFixed(1)})`}</title>
-        </circle>
-        {observed.map(point => <circle key={point.attempt} cx={xAt(point.attempt)}
-          cy={yAt(point.rate)} r="6"
-          className={point.accuracy >= ACCURACY_AIM
-            ? 'bl-observation is-accurate' : 'bl-observation is-building'}>
-          <title>{`Attempt ${point.attempt} · ${point.rate.toFixed(1)}/min · ${point.accuracy.toFixed(0)}% · ${formatDate(point.date)}`}</title>
-        </circle>)}
-        <text x={margin.left + plotWidth / 2} y={height - 14} textAnchor="middle"
-          className="bl-chart-axis">Attempt number</text>
-        <text x="19" y={margin.top + plotHeight / 2} textAnchor="middle"
-          transform={`rotate(-90 19 ${margin.top + plotHeight / 2})`}
-          className="bl-chart-axis">Correct responses per minute</text>
-      </svg>
-    </div>
-  )
+function PackSelector({ quizzes, selectedQuiz, onSelect }: {
+  quizzes: [string, { title: string; mode: ResponseMode }][]
+  selectedQuiz: string
+  onSelect: (quizId: string) => void
+}) {
+  const menuRef = useRef<HTMLDetailsElement>(null)
+  const selected = quizzes.find(([id]) => id === selectedQuiz)?.[1]
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) menuRef.current?.removeAttribute('open')
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [])
+
+  return <div className="bl-pack-selector">
+    <span>Fluency pack</span>
+    <details ref={menuRef} onKeyDown={event => {
+      if (event.key === 'Escape') {
+        menuRef.current?.removeAttribute('open')
+        menuRef.current?.querySelector('summary')?.focus()
+      }
+    }}>
+      <summary aria-label={`Fluency pack: ${selected?.title ?? 'Choose a pack'}`}>
+        <span>{selected?.title} · {selected?.mode === 'typed' ? 'Typed' : 'Options'}</span>
+        <span aria-hidden="true">⌄</span>
+      </summary>
+      <div className="bl-pack-selector-menu" role="group" aria-label="Choose a fluency pack">
+        {quizzes.map(([id, quiz]) => <button key={id} type="button"
+          aria-current={id === selectedQuiz ? 'true' : undefined}
+          onClick={() => {
+            onSelect(id)
+            menuRef.current?.removeAttribute('open')
+            menuRef.current?.querySelector('summary')?.focus()
+          }}>
+          {quiz.title} · {quiz.mode === 'typed' ? 'Typed' : 'Options'}
+        </button>)}
+      </div>
+    </details>
+  </div>
 }
 
 export default function ProgressPage() {
@@ -241,13 +211,21 @@ export default function ProgressPage() {
     setLoading(true)
     const loadAttempts = async () => {
       try {
-        const { data, error } = await supabase.from('quiz_attempts').select(`
-          id, quiz_id, student_name, total_questions, correct_answers,
-          accuracy_percentage, fluency_rate, total_time_minutes, completed_at,
-          quizzes!inner(title, description, response_mode)
-        `).eq('user_id', user.id).order('completed_at', { ascending: false })
-        if (error) throw error
-        const typedData = (data || []).map((item: any) => ({
+        const records: any[] = []
+        for (let offset = 0; ; offset += 500) {
+          const { data, error } = await supabase.from('quiz_attempts').select(`
+            id, quiz_id, student_name, total_questions, correct_answers,
+            accuracy_percentage, fluency_rate, total_time_minutes, completed_at, completed_day_ldn,
+            attempt_purpose, session_id, independent, assistance_used, terminal_option_condition,
+            learner_local_date, completed, hint_used_any, fewer_options_used,
+            quizzes!inner(title, description, response_mode)
+          `).eq('user_id', user.id).order('completed_at', { ascending: false })
+            .order('id', { ascending: false }).range(offset, offset + 499)
+          if (error) throw error
+          records.push(...(data || []))
+          if (!data || data.length < 500) break
+        }
+        const typedData = records.map((item: any) => ({
           ...item,
           quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes,
         })) as QuizAttempt[]
@@ -284,9 +262,19 @@ export default function ProgressPage() {
   const selectedMeta = quizzes.find(([id]) => id === selectedQuiz)?.[1]
   const selectedMode: ResponseMode = selectedMeta?.mode ?? 'options'
   const fluencyAim = FLUENCY_AIMS[selectedMode]
-  const chronological = useMemo(() => eligibleAttempts(selectedAttempts), [selectedAttempts])
-  const history = useMemo(() => toStateSpaceHistory(selectedAttempts), [selectedAttempts])
-  const observed = useMemo(() => toObservedPoints(selectedAttempts), [selectedAttempts])
+  const accuracyAttempts = useMemo(() => completedAttempts(selectedAttempts), [selectedAttempts])
+  const cumulative = useMemo(() => cumulativeRecord(attempts), [attempts])
+  const fluencySource = useMemo(() => recognisesEarlierTimings(selectedAttempts)
+    ? selectedAttempts : selectedAttempts.filter(attempt => attempt.attempt_purpose !== null), [selectedAttempts])
+  const chronological = useMemo(() => eligibleAttempts(fluencySource), [fluencySource])
+  const history = useMemo(() => toStateSpaceHistory(fluencySource), [fluencySource])
+  const observed = useMemo(() => toObservedPoints(fluencySource), [fluencySource])
+  const filtered = useMemo(() => {
+    const probes = eligibleAttempts(fluencySource)
+    const firstDay = probes[0] ? new Date(`${dayKey(probes[0])}T12:00:00Z`).getTime() : 0
+    const elapsed = probes.map(probe => (new Date(`${dayKey(probe)}T12:00:00Z`).getTime() - firstDay) / 86_400_000)
+    return filterObservedFluency(STATE_SPACE_BUNDLE, selectedMode, history, elapsed)
+  }, [fluencySource, selectedMode, history])
   const latest = chronological[chronological.length - 1]
   const plannedItems = latest
     ? Math.max(1, Math.round(Number(latest.total_questions))) : 36
@@ -295,10 +283,6 @@ export default function ProgressPage() {
   const nextForecast = useMemo(() => forecastNextAttempt(STATE_SPACE_BUNDLE, {
     mode: selectedMode, history, nextGapDays: elapsedDaysSinceLatest, plannedItems,
   }), [selectedMode, history, elapsedDaysSinceLatest, plannedItems])
-  const nextFluencySamples = useMemo(() => forecastNextAttemptFluencySamples(
-    STATE_SPACE_BUNDLE,
-    { mode: selectedMode, history, nextGapDays: elapsedDaysSinceLatest, plannedItems },
-  ), [selectedMode, history, elapsedDaysSinceLatest, plannedItems])
   const bestRate = observed.length ? Math.max(...observed.map(point => point.rate)) : 0
 
   if (loading || authLoading || !user) return <div className="bl-page bl-loading min-h-screen">
@@ -333,28 +317,55 @@ export default function ProgressPage() {
     <main className="bl-container bl-progress-main">
       <section className="bl-progress-intro">
         <div><p className="bl-kicker">Performance record</p>
-          <h1>Your progress and next-attempt estimate.</h1>
-          <p>The graph shows this learner’s recorded timings and the posterior predictive distribution if the same pack were attempted now.</p>
-          <p>A timing meets the current aim at 100% accuracy and {fluencyAim} correct responses per minute. One timing is not a mastery decision.</p>
+          <h1>Your practice, accuracy and speed.</h1>
+          <div className="bl-progress-rules">
+            <p><strong>Accuracy record</strong><span>Every completed attempt, including timed practice.</span></p>
+            <p><strong>Fluency aim</strong><span>One daily timing at 100% and {fluencyAim} correct/min.</span></p>
+          </div>
         </div>
-        {attempts.length > 0 && <label className="bl-pack-selector">
-          <span>Fluency pack</span>
-          <select value={selectedQuiz} onChange={event => setSelectedQuiz(event.target.value)}>
-            {quizzes.map(([id, quiz]) => <option key={id} value={id}>
-              {quiz.title} · {quiz.mode === 'typed' ? 'Typed' : 'Options'}
-            </option>)}
-          </select>
-        </label>}
+        {attempts.length > 0 && <PackSelector quizzes={quizzes} selectedQuiz={selectedQuiz} onSelect={setSelectedQuiz} />}
       </section>
 
       {attempts.length === 0 ? <section className="bl-progress-empty">
-        <span>NO_TIMINGS_RECORDED</span>
-        <h2>Your performance record starts with a fluency timing.</h2>
-        <p>Complete a pack and its accuracy, rate and duration will appear here automatically.</p>
+        <span>NO_ATTEMPTS_RECORDED</span>
+        <h2>Your performance record starts with a pack attempt.</h2>
+        <p>First, work toward getting every answer right. After two perfect sessions without prompts, you can start timed practice.</p>
         <button className="bl-button" onClick={() => router.push('/')}>
           Choose a pack <span>→</span>
         </button>
-      </section> : latest ? <>
+      </section> : <>
+        <section className="bl-trajectory-panel bl-accuracy-panel" aria-label="Accuracy by attempt">
+          <div className="bl-panel-heading"><div>
+            <p className="bl-kicker">01 · Accuracy</p><h2>{selectedMeta?.title}</h2>
+          </div><div className="bl-model-state"><i /><span>{accuracyAttempts.length} completed attempt{accuracyAttempts.length === 1 ? '' : 's'}</span></div></div>
+          <AccuracyByAttempt attempts={accuracyAttempts} />
+        </section>
+
+        {latest ? <>
+        <section className="bl-trajectory-panel">
+          <div className="bl-panel-heading"><div>
+            <p className="bl-kicker">02 · Timed practice</p><h2>{selectedMeta?.title}</h2>
+          </div><div className="bl-model-state"><i />
+            <span>{history.length < 2 ? 'Limited history' : 'Observed timings'}</span>
+          </div></div>
+          <FluencyTrajectory observed={observed} filtered={filtered} aim={fluencyAim} />
+          <div className="bl-chart-key">
+            <span><i className="bl-key-point" />First timing each day</span>
+            <span><i className="bl-key-point" style={{ opacity: 0.28 }} />Later practice</span>
+            <span><i className="bl-key-observed" />Filtered rate and 80% band</span>
+          </div>
+          <p className="bl-chart-note">The band covers the observed days. Zero-correct timings appear at the chart floor on the ratio scale. The next-attempt estimate below is separate.</p>
+          {filtered.weeklyFactor && history.length >= 3 && observed.filter(point => point.dailyProbe).length >= 3 &&
+            daysBetween(new Date(observed.filter(point => point.dailyProbe).at(-1)!.date), new Date(observed.find(point => point.dailyProbe)!.date)) >= 7 &&
+            <p className="bl-celeration">Provisional model-implied change over these observed days: ×{filtered.weeklyFactor.point.toFixed(2)}/week
+              <span> · 80% across parameter draws ×{filtered.weeklyFactor.lower80.toFixed(2)}–×{filtered.weeklyFactor.upper80.toFixed(2)}</span>
+            </p>}
+          {history.length < 2 && <div className="bl-early-notice">
+            <strong>Limited history</strong>
+            <span>Complete at least two timings on this pack before interpreting the personalised next-attempt estimate. Until then, the population prior contributes most of the information.</span>
+          </div>}
+        </section>
+
         <section className="bl-progress-summary" aria-label="Performance summary">
           <div><span>Latest timing</span>
             <strong>{Number(latest.fluency_rate).toFixed(1)}<small>/min</small></strong>
@@ -372,52 +383,8 @@ export default function ProgressPage() {
           </div>
           <div><span>Best observed</span>
             <strong>{bestRate.toFixed(1)}<small>/min</small></strong>
-            <p>{observed.length} eligible timing{observed.length === 1 ? '' : 's'}</p>
+            <p>{observed.length} timed attempt{observed.length === 1 ? '' : 's'}</p>
           </div>
-        </section>
-
-        <section className="bl-trajectory-panel">
-          <div className="bl-panel-heading"><div>
-            <p className="bl-kicker">Fluency trajectory</p><h2>{selectedMeta?.title}</h2>
-          </div><div className="bl-model-state"><i />
-            <span>{history.length < 2 ? 'Limited history' : 'Personalised forecast'}</span>
-          </div></div>
-          <FluencyTrajectory observed={observed} forecast={nextForecast}
-            fluencySamples={nextFluencySamples} aim={fluencyAim} />
-          <div className="bl-chart-key">
-            <span><i className="bl-key-point" />Observed timing</span>
-            <span><i className="bl-key-observed" />Observed path</span>
-            <span><i className="bl-key-point" style={{ background: '#152219' }} />Median if attempted now</span>
-            <span><i style={{ background: '#2f6f4e', opacity: 0.35 }} />Posterior predictive density</span>
-          </div>
-          {history.length < 2 && <div className="bl-early-notice">
-            <strong>Limited history</strong>
-            <span>Complete at least two timings on this pack before interpreting the personalised next-attempt estimate. Until then, the population prior contributes most of the information.</span>
-          </div>}
-        </section>
-
-        <section className="bl-history-panel">
-          <div className="bl-panel-heading bl-panel-heading-compact"><div>
-            <p className="bl-kicker">Timing log</p><h2>Recent attempts</h2>
-          </div></div>
-          <div className="bl-history-scroll"><table>
-            <thead><tr><th>Attempt</th><th>Date</th><th>Accuracy</th><th>Correct/min</th><th>Duration</th><th>Status</th></tr></thead>
-            <tbody>{chronological.slice().reverse().slice(0, 10).map((attempt, reverseIndex) => {
-              const attemptNumber = chronological.length - reverseIndex
-              const meetsAim = Number(attempt.accuracy_percentage) >= ACCURACY_AIM &&
-                Number(attempt.fluency_rate) >= fluencyAim
-              return <tr key={attempt.id}>
-                <td>A{String(attemptNumber).padStart(2, '0')}</td>
-                <td>{formatDate(attempt.completed_at)}</td>
-                <td>{Number(attempt.accuracy_percentage).toFixed(0)}%</td>
-                <td>{Number(attempt.fluency_rate).toFixed(1)}</td>
-                <td>{Number(attempt.total_time_minutes).toFixed(1)} min</td>
-                <td><span className={meetsAim ? 'is-met' : 'is-building'}>
-                  {meetsAim ? 'Timing aim met' : 'Building'}
-                </span></td>
-              </tr>
-            })}</tbody>
-          </table></div>
         </section>
 
         <section className="bl-technical-panel">
@@ -432,22 +399,69 @@ export default function ProgressPage() {
               <p>The latent learner state tracks accuracy and log seconds per item together, including changing levels, trends, practice gaps and residual association.</p>
             </div>
             <div><span>Personalisation</span>
-              <strong>{history.length} eligible timing{history.length === 1 ? '' : 's'} on this pack</strong>
-              <p>Each timing updates the learner’s filtered latent state. New learners begin at the fitted population distribution.</p>
+              <strong>{history.length} first-daily timing{history.length === 1 ? '' : 's'} on this pack</strong>
+              <p>Only the first timing each day updates the filtered latent state. Later timings that day remain on the chart as practice.</p>
             </div>
             <div><span>Uncertainty</span>
-              <strong>{nextFluencySamples.length} posterior predictive draws</strong>
-              <p>The half-eye shows where next-attempt outcomes are most plausible; the dot is the median and the vertical line is the central 80% interval.</p>
+              <strong>Filtered latent rate with an 80% interval</strong>
+              <p>The green band represents uncertainty in latent rate over the days with observed daily probes. Later same-day practice remains visible but does not update that curve.</p>
             </div>
-            <div><span>Numerical validation</span><strong>R and TypeScript matched</strong>
-              <p>All five golden scenarios matched the offline R reference within 1e-7 tolerance.</p>
+            <div><span>Numerical validation</span><strong>Next-attempt engine checked against R</strong>
+              <p>The original next-attempt forecasts matched five offline R reference scenarios. The new observed-day filter and weekly summary still need separate equivalence checks.</p>
+            </div>
+            <div><span>Weekly change</span><strong>Exploratory within the observed period</strong>
+              <p>The weekly factor summarises the modelled rate over recorded daily probes. Its interval reflects parameter-draw variation and is not a fully calibrated celeration interval.</p>
             </div>
             <div><span>Interpretation</span><strong>Estimate if attempted now, not a guarantee</strong>
               <p>No multi-session trajectory is extrapolated. Typed-mode estimates remain tentative because the historical typed sample is small.</p>
             </div>
           </div>}
         </section>
-      </> : null}
+      </> : <section className="bl-trajectory-panel" aria-label="Timed practice locked">
+        <div className="bl-panel-heading"><div>
+          <p className="bl-kicker">02 · Timed practice</p><h2>{selectedMeta?.title}</h2>
+        </div></div>
+        <div className="bl-fluency-locked">
+          <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+            <rect x="12" y="28" width="40" height="29" rx="3" stroke="currentColor" strokeWidth="4" />
+            <path d="M21 28v-9a11 11 0 0 1 22 0v9" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+            <circle cx="32" cy="41" r="3" fill="currentColor" />
+          </svg>
+          <p>Complete two accuracy sets at 100% to unlock fluency practice</p>
+        </div>
+      </section>}
+
+        <section className="bl-history-panel">
+          <div className="bl-panel-heading bl-panel-heading-compact"><div>
+            <p className="bl-kicker">Attempt record</p><h2>Recent completed attempts</h2>
+          </div></div>
+          <div className="bl-history-scroll"><table>
+            <thead><tr><th>Attempt</th><th>Date</th><th>Accuracy</th><th>Hint</th><th>Rate</th><th>Status</th></tr></thead>
+            <tbody>{accuracyAttempts.slice().reverse().slice(0, 10).map((attempt, reverseIndex) => {
+              const attemptNumber = accuracyAttempts.length - reverseIndex
+              const meetsAim = Number(attempt.accuracy_percentage) >= ACCURACY_AIM &&
+                Number(attempt.fluency_rate) >= fluencyAim && attempt.attempt_purpose !== 'accuracy_probe' && attempt.attempt_purpose !== 'accuracy_practice'
+              return <tr key={attempt.id}>
+                <td>A{String(attemptNumber).padStart(2, '0')}</td>
+                <td>{formatDate(attempt.completed_at)}</td>
+                <td>{Number(attempt.accuracy_percentage).toFixed(0)}%</td>
+                <td>{attempt.hint_used_any === null ? 'Unknown' : attempt.hint_used_any ? 'Used' : 'No'}</td>
+                <td>{attempt.attempt_purpose?.startsWith('accuracy') ? '—' : `${Number(attempt.fluency_rate).toFixed(1)}/min`}</td>
+                <td><span className={meetsAim ? 'is-met' : 'is-building'}>
+                  {meetsAim ? 'Timing aim met' : attempt.fewer_options_used ? 'Fewer options' : attempt.assistance_used ? 'Supported' : 'Practice'}
+                </span></td>
+              </tr>
+            })}</tbody>
+          </table></div>
+        </section>
+
+        <section className="bl-trajectory-panel" aria-label="Cumulative learning record">
+          <div className="bl-panel-heading"><div>
+            <p className="bl-kicker">03 · Cumulative record</p><h2>Practice adds up.</h2>
+          </div></div>
+          <CumulativeRecord points={cumulative} />
+        </section>
+      </>}
     </main>
   </div>
 }
