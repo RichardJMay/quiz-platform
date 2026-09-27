@@ -27,8 +27,6 @@ interface BankedQuestion {
 
 type TimingResult = { minutes: number; rate: number; percentage: number; saved: boolean; complete: boolean }
 
-type AliasMap = Record<string, string[]>
-
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice()
   for (let i = a.length - 1; i > 0; i--) {
@@ -56,12 +54,14 @@ export default function QuizTakerBankedTyped() {
   const [questions, setQuestions] = useState<BankedQuestion[]>([])
   const [terms, setTerms] = useState<Term[]>([])
   const [remainingTerms, setRemainingTerms] = useState<Term[]>([])
-  const [aliases, setAliases] = useState<AliasMap>({})
 
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [typed, setTyped] = useState('')
 
   const [showFeedback, setShowFeedback] = useState(false)
+  const [itemSaveFailed, setItemSaveFailed] = useState(false)
+  const [responseSaving, setResponseSaving] = useState(false)
+  const submittingRef = useRef(false)
   const [hintShown, setHintShown] = useState(false)
   const [studentName, setStudentName] = useState('')
   const [score, setScore] = useState(0)
@@ -151,28 +151,15 @@ export default function QuizTakerBankedTyped() {
       // ✅ Randomize QUESTION order (only)
       const randomizedQs = shuffle(qData || [])
 
-      // Optional aliases
-      let aliasMap: AliasMap = {}
-      const { data: aliasRows, error: aErr } = await supabase
-        .from('quiz_term_aliases')
-        .select('term_id, alias_text')
-        .in('term_id', (termData || []).map(t => t.id))
-      if (!aErr && aliasRows) {
-        aliasMap = aliasRows.reduce((acc: AliasMap, row: any) => {
-          const arr = acc[row.term_id] || []
-          arr.push(row.alias_text)
-          acc[row.term_id] = arr
-          return acc
-        }, {})
-      }
-      setAliases(aliasMap)
-
       setTerms(termData || [])
       setRemainingTerms(termData || [])
       setQuestions(randomizedQs as BankedQuestion[])
       setCurrentQuestionIndex(0)
       setTyped('')
       setShowFeedback(false)
+      setItemSaveFailed(false)
+      setResponseSaving(false)
+      submittingRef.current = false
       setHintShown(false)
       setScore(0)
       setQuizCompleted(false)
@@ -253,7 +240,7 @@ export default function QuizTakerBankedTyped() {
     const t = normalize(typed)
     if (!t) return { isCorrect: false }
 
-    const candidates = [correctTerm.term_text, ...(aliases[correctTerm.id] || [])]
+    const candidates = [correctTerm.term_text]
       .map(normalize)
       .filter(Boolean)
 
@@ -262,7 +249,9 @@ export default function QuizTakerBankedTyped() {
   }
 
   const submitAnswer = async () => {
-    if (!currentQuestion) return
+    if (!currentQuestion || !user || submittingRef.current || finishingRef.current) return
+    submittingRef.current = true
+    setResponseSaving(true)
 
     const { isCorrect, matchedTermId } = gradeTyped()
     if (isCorrect && matchedTermId) {
@@ -270,15 +259,24 @@ export default function QuizTakerBankedTyped() {
       setRemainingTerms(prev => prev.filter(t => t.id !== matchedTermId))
     }
 
-    await supabase.from('student_responses').insert([{
-      student_name: studentName,
-      question_id: currentQuestion.id,
-      selected_term_id: matchedTermId ?? null,
-      free_text: typed,
-      is_correct: isCorrect,
-    }])
-
-    setShowFeedback(true)
+    try {
+      const { error } = await supabase.from('student_responses').insert([{
+        user_id: user.id,
+        student_name: studentName,
+        question_id: currentQuestion.id,
+        selected_term_id: matchedTermId ?? null,
+        free_text: typed,
+        is_correct: isCorrect,
+        hint_used: hintShown,
+      }])
+      if (error) throw error
+    } catch (error) {
+      console.error('Could not save typed item response:', error)
+      setItemSaveFailed(true)
+    } finally {
+      setResponseSaving(false)
+      setShowFeedback(true)
+    }
   }
 
   const nextQuestion = () => {
@@ -287,6 +285,8 @@ export default function QuizTakerBankedTyped() {
       setCurrentQuestionIndex(currentQuestionIndex + 1)
       setTyped('')
       setShowFeedback(false)
+      setResponseSaving(false)
+      submittingRef.current = false
       setHintShown(false)
     } else {
       void finishTiming(true)
@@ -336,10 +336,12 @@ export default function QuizTakerBankedTyped() {
     setQuestions([])
     setTerms([])
     setRemainingTerms([])
-    setAliases({})
     setCurrentQuestionIndex(0)
     setTyped('')
     setShowFeedback(false)
+    setItemSaveFailed(false)
+    setResponseSaving(false)
+    submittingRef.current = false
     setScore(0)
     setQuizCompleted(false)
     setSaving(false)
@@ -384,6 +386,9 @@ export default function QuizTakerBankedTyped() {
               : result.complete
                 ? 'We could not confirm that this timing was saved. Please check your progress before starting another.'
                 : 'This timing ended after inactivity and was not added to your performance record.'}</p>
+            {result.saved && itemSaveFailed && <p className="bl-complete-lede" role="alert">
+              The timing was saved, but one or more item responses could not be recorded.
+            </p>}
 
             {result.complete && <div className="bl-result-grid">
               <div className="bl-result-cell"><span>Accuracy</span><strong>{percentage}%</strong><small>{score}/{questions.length} correct</small></div>
@@ -438,7 +443,7 @@ export default function QuizTakerBankedTyped() {
               <span>How this timing works</span>
               <ol>
                 <li><b>01</b><p>Read the definition and type the matching term.</p></li>
-                <li><b>02</b><p>Use exact terminology; accepted aliases are recognised automatically.</p></li>
+                <li><b>02</b><p>Type the term as listed in the pack. Letter case and extra spaces do not matter.</p></li>
                 <li><b>03</b><p>Work accurately and build toward {threshold} correct responses per minute.</p></li>
               </ol>
               <button onClick={() => startQuiz(selectedQuiz)} className="bl-button bl-start-button">Start timing <span>→</span></button>
@@ -522,7 +527,7 @@ export default function QuizTakerBankedTyped() {
 
               <div className="bl-response-actions">
                 {!showFeedback ? (
-                  <button onClick={submitAnswer} disabled={typed.trim().length === 0} className="bl-button">Check response <span>→</span></button>
+                  <button onClick={submitAnswer} disabled={typed.trim().length === 0 || responseSaving} className="bl-button">{responseSaving ? 'Recording response…' : 'Check response'} <span>→</span></button>
                 ) : (
                   <button onClick={nextQuestion} disabled={saving} className="bl-button">{saving ? 'Saving timing…' : currentQuestionIndex < questions.length - 1 ? 'Next definition' : 'Finish timing'} <span>→</span></button>
                 )}

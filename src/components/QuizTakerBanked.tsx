@@ -56,6 +56,9 @@ export default function QuizTakerBanked() {
   const [selectedTermId, setSelectedTermId] = useState<string>('')
 
   const [showFeedback, setShowFeedback] = useState(false)
+  const [itemSaveFailed, setItemSaveFailed] = useState(false)
+  const [responseSaving, setResponseSaving] = useState(false)
+  const submittingRef = useRef(false)
   const [hintShown, setHintShown] = useState(false)
   const [studentName, setStudentName] = useState('')
 
@@ -162,6 +165,9 @@ export default function QuizTakerBanked() {
       setCurrentQuestionIndex(0)
       setSelectedTermId('')
       setShowFeedback(false)
+      setItemSaveFailed(false)
+      setResponseSaving(false)
+      submittingRef.current = false
       setHintShown(false)
       setScore(0)
       setQuizCompleted(false)
@@ -252,7 +258,9 @@ export default function QuizTakerBanked() {
       alert('Please select an answer')
       return
     }
-    if (!currentQuestion) return
+    if (!currentQuestion || !user || submittingRef.current || finishingRef.current) return
+    submittingRef.current = true
+    setResponseSaving(true)
 
     const isCorrect = selectedTermId === currentQuestion.correct_term_id
     if (isCorrect) {
@@ -261,16 +269,25 @@ export default function QuizTakerBanked() {
       setRemainingTerms(prev => prev.filter(t => t.id !== selectedTermId))
     }
 
-    await supabase
-      .from('student_responses')
-      .insert([{
-        student_name: studentName,
-        question_id: currentQuestion.id,
-        selected_term_id: selectedTermId,
-        is_correct: isCorrect,
-      }])
-
-    setShowFeedback(true)
+    try {
+      const { error } = await supabase
+        .from('student_responses')
+        .insert([{
+          user_id: user.id,
+          student_name: studentName,
+          question_id: currentQuestion.id,
+          selected_term_id: selectedTermId,
+          is_correct: isCorrect,
+          hint_used: hintShown,
+        }])
+      if (error) throw error
+    } catch (error) {
+      console.error('Could not save item response:', error)
+      setItemSaveFailed(true)
+    } finally {
+      setResponseSaving(false)
+      setShowFeedback(true)
+    }
   }
 
   const nextQuestion = () => {
@@ -279,6 +296,8 @@ export default function QuizTakerBanked() {
       setCurrentQuestionIndex(currentQuestionIndex + 1)
       setSelectedTermId('')
       setShowFeedback(false)
+      setResponseSaving(false)
+      submittingRef.current = false
       setHintShown(false)
     } else {
       void finishTiming(true)
@@ -339,6 +358,9 @@ export default function QuizTakerBanked() {
     setCurrentQuestionIndex(0)
     setSelectedTermId('')
     setShowFeedback(false)
+    setItemSaveFailed(false)
+    setResponseSaving(false)
+    submittingRef.current = false
     setScore(0)
     setQuizCompleted(false)
     setSaving(false)
@@ -385,6 +407,9 @@ export default function QuizTakerBanked() {
               : result.complete
                 ? 'We could not confirm that this timing was saved. Please check your progress before starting another.'
                 : 'This timing ended after inactivity and was not added to your performance record.'}</p>
+            {result.saved && itemSaveFailed && <p className="bl-complete-lede" role="alert">
+              The timing was saved, but one or more item responses could not be recorded.
+            </p>}
 
             {result.complete && <div className="bl-result-grid">
               <div className="bl-result-cell">
@@ -534,10 +559,10 @@ export default function QuizTakerBanked() {
                 {!showFeedback ? (
                   <button
                     onClick={submitAnswer}
-                    disabled={!selectedTermId}
+                    disabled={!selectedTermId || responseSaving}
                     className="bl-button"
                   >
-                    Check response <span>→</span>
+                    {responseSaving ? 'Recording response…' : 'Check response'} <span>→</span>
                   </button>
                 ) : (
                   <button
