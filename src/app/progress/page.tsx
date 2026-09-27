@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '../../contexts/AuthContext'
@@ -42,7 +42,7 @@ interface ObservedPoint {
 
 const STATE_SPACE_BUNDLE =
   stateSpaceBundleJson as unknown as StateSpacePosteriorBundleV3
-const ACCURACY_AIM = 90
+const ACCURACY_AIM = 100
 const FLUENCY_AIMS: Record<ResponseMode, number> = { options: 15, typed: 6 }
 const EXCLUDED_ATTEMPT_IDS = new Set([
   '157f465a-957c-46bf-b523-0b56134d5118',
@@ -224,16 +224,22 @@ export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([])
   const [selectedQuiz, setSelectedQuiz] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const [showTechnical, setShowTechnical] = useState(false)
-  const loadingRef = useRef(false)
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
-    if (!user) { router.push('/'); return }
-    if (loadingRef.current) return
+    if (authLoading) return
+    setAttempts([])
+    setSelectedQuiz('')
+    setLoadError(false)
+    if (!user) { router.replace('/'); return }
+
+    let cancelled = false
+    setLoading(true)
     const loadAttempts = async () => {
-      loadingRef.current = true
       try {
         const { data, error } = await supabase.from('quiz_attempts').select(`
           id, quiz_id, student_name, total_questions, correct_answers,
@@ -245,17 +251,19 @@ export default function ProgressPage() {
           ...item,
           quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes,
         })) as QuizAttempt[]
+        if (cancelled) return
         setAttempts(typedData)
-        setSelectedQuiz(current => current || typedData[0]?.quiz_id || '')
+        setSelectedQuiz(typedData[0]?.quiz_id || '')
       } catch (error) {
         console.error('Error loading progress:', error)
+        if (!cancelled) setLoadError(true)
       } finally {
-        setLoading(false)
-        loadingRef.current = false
+        if (!cancelled) setLoading(false)
       }
     }
     void loadAttempts()
-  }, [router, user])
+    return () => { cancelled = true }
+  }, [router, user?.id, authLoading, reloadKey])
 
   const quizzes = useMemo(() => {
     const map = new Map<string, { title: string; mode: ResponseMode }>()
@@ -293,9 +301,20 @@ export default function ProgressPage() {
   ), [selectedMode, history, elapsedDaysSinceLatest, plannedItems])
   const bestRate = observed.length ? Math.max(...observed.map(point => point.rate)) : 0
 
-  if (loading) return <div className="bl-page bl-loading min-h-screen">
+  if (loading || authLoading || !user) return <div className="bl-page bl-loading min-h-screen">
     <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
     <p className="bl-kicker">Loading performance record</p>
+  </div>
+
+  if (loadError) return <div className="bl-page bl-progress-page">
+    <main className="bl-container bl-progress-main">
+      <section className="bl-progress-empty" role="alert">
+        <h1>We couldn’t load your progress.</h1>
+        <p>Your record may still be available. Try again before starting another timing.</p>
+        <button className="bl-button" onClick={() => setReloadKey(value => value + 1)}>Try again</button>
+        <Link href="/">Return home</Link>
+      </section>
+    </main>
   </div>
 
   return <div className="bl-page bl-progress-page">
@@ -316,6 +335,7 @@ export default function ProgressPage() {
         <div><p className="bl-kicker">Performance record</p>
           <h1>Your progress and next-attempt estimate.</h1>
           <p>The graph shows this learner’s recorded timings and the posterior predictive distribution if the same pack were attempted now.</p>
+          <p>A timing meets the current aim at 100% accuracy and {fluencyAim} correct responses per minute. One timing is not a mastery decision.</p>
         </div>
         {attempts.length > 0 && <label className="bl-pack-selector">
           <span>Fluency pack</span>
@@ -393,7 +413,7 @@ export default function ProgressPage() {
                 <td>{Number(attempt.fluency_rate).toFixed(1)}</td>
                 <td>{Number(attempt.total_time_minutes).toFixed(1)} min</td>
                 <td><span className={meetsAim ? 'is-met' : 'is-building'}>
-                  {meetsAim ? 'Aim met' : 'Building'}
+                  {meetsAim ? 'Timing aim met' : 'Building'}
                 </span></td>
               </tr>
             })}</tbody>

@@ -36,9 +36,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   // Track the last logical user id we emitted to avoid duplicate updates
   const lastUserIdRef = useRef<string | null>(null)
 
-  // Track which user id we've already run linkExistingPurchases for
-  const purchasesLinkedForUserIdRef = useRef<string | null>(null)
-
   useEffect(() => {
     let mounted = true
 
@@ -61,14 +58,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     init()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, nextSession) => {
+      (event, nextSession) => {
         if (!mounted) return
 
         const nextId = nextSession?.user?.id ?? null
 
         // If Supabase replays SIGNED_IN for the same user (tab focus/refresh), don't swap the user object
         if (event === 'SIGNED_IN' && nextId && nextId === lastUserIdRef.current) {
-          console.log('[auth] duplicate SIGNED_IN for same user — ignoring user update')
           setSession(nextSession ?? null) // keep session fresh
           // (do NOT call setUser)
           return
@@ -86,18 +82,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         setUser(nextSession?.user ?? null)
         setLoading(false)
 
-        // Only try to link purchases once per user id
-        if (event === 'SIGNED_IN' && nextSession?.user) {
-          if (purchasesLinkedForUserIdRef.current !== nextSession.user.id) {
-            await linkExistingPurchases(nextSession.user)
-            purchasesLinkedForUserIdRef.current = nextSession.user.id
-          }
-        }
-
-        // On SIGNED_OUT, clear the marker
-        if (event === 'SIGNED_OUT') {
-          purchasesLinkedForUserIdRef.current = null
-        }
       }
     )
 
@@ -106,39 +90,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       subscription.unsubscribe()
     }
   }, [])
-
-  // Keepalive — optional but harmless
-  useEffect(() => {
-    if (!user) return
-    const interval = setInterval(async () => {
-      const { data: { session }, error } = await supabase.auth.getSession()
-      if (error) {
-        console.error('Keepalive error:', error)
-      } else {
-        console.log('Keepalive: session', session ? 'active' : 'inactive')
-      }
-    }, 10 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [user])
-
-  // Link existing purchases made with email to the newly authenticated user
-  const linkExistingPurchases = async (user: User) => {
-    try {
-      const { error } = await supabase
-        .from('purchases')
-        .update({ user_id: user.id })
-        .eq('user_email', user.email)
-        .is('user_id', null)
-
-      if (error) {
-        console.error('Error linking existing purchases:', error)
-      } else {
-        console.log('Successfully linked existing purchases to user')
-      }
-    } catch (error) {
-      console.error('Error in linkExistingPurchases:', error)
-    }
-  }
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     const { data, error } = await supabase.auth.signUp({
@@ -155,7 +106,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }
 
   const signOut = async () => {
-    purchasesLinkedForUserIdRef.current = null
     const { error } = await supabase.auth.signOut()
     return { error }
   }

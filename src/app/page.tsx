@@ -1,12 +1,11 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase, supabasePublic } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '../contexts/AuthContext'
 import { ArrowRight } from 'lucide-react'
-import { executeAuthQuery } from '@/lib/supabase-utils'
 
 interface Category {
   id: string
@@ -17,46 +16,70 @@ interface Category {
   quizzes: { count: number }[]
 }
 
-interface PurchasedQuiz {
-  quiz_id: string
-  purchased_at: string
-  quizzes: {
-    id: string
-    title: string
-    description: string
-  } | null
+interface ContinueQuiz {
+  id: string
+  title: string
 }
 
 export default function LandingPage() {
   const [categories, setCategories] = useState<Category[]>([])
-  const [purchasedQuizzes, setPurchasedQuizzes] = useState<PurchasedQuiz[]>([])
   const [loading, setLoading] = useState(true)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login')
-  const [showMyQuizzes, setShowMyQuizzes] = useState(false)
+  const [continueQuiz, setContinueQuiz] = useState<ContinueQuiz | null>(null)
+  const [continueLoading, setContinueLoading] = useState(false)
   const router = useRouter()
   const { user, signOut, loading: authLoading } = useAuth()
 
-  const firstRun = useRef(false)
-  const loadPurchasedQuizzesRef = useRef(false)
+  useEffect(() => {
+    void loadCategories()
+  }, [])
 
   useEffect(() => {
-    if (window.location.pathname !== '/') return
+    let cancelled = false
+    setContinueQuiz(null)
 
-    try {
-      localStorage.removeItem('stripe_payment_intent')
-      sessionStorage.removeItem('stripe_payment_intent')
-    } catch (error) {
-      console.log('Storage cleanup failed:', error)
+    if (!user) {
+      setContinueLoading(false)
+      return
     }
 
-    if (!firstRun.current) {
-      firstRun.current = true
-      void loadCategories()
+    setContinueLoading(true)
+    const loadContinueQuiz = async () => {
+      try {
+        const { data: attempts, error: attemptsError } = await supabase
+          .from('quiz_attempts')
+          .select('quiz_id')
+          .eq('user_id', user.id)
+          .order('completed_at', { ascending: false })
+          .limit(10)
+
+        if (attemptsError) throw attemptsError
+        if (!attempts?.length) return
+
+        const { data: available, error: quizzesError } = await supabasePublic
+          .from('quizzes')
+          .select('id, title, quiz_mode')
+          .in('id', [...new Set(attempts.map(attempt => attempt.quiz_id))])
+          .eq('is_listed', true)
+
+        if (quizzesError) throw quizzesError
+        const banked = new Map((available ?? [])
+          .filter(quiz => quiz.quiz_mode === 'banked')
+          .map(quiz => [quiz.id, quiz.title]))
+        const recent = attempts.find(attempt => banked.has(attempt.quiz_id))
+        if (!cancelled && recent) {
+          setContinueQuiz({ id: recent.quiz_id, title: banked.get(recent.quiz_id)! })
+        }
+      } catch (error) {
+        console.error('Could not load recent practice:', error)
+      } finally {
+        if (!cancelled) setContinueLoading(false)
+      }
     }
 
-    if (user) void loadPurchasedQuizzes()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadContinueQuiz()
+    return () => { cancelled = true }
   }, [user?.id])
 
   const loadCategories = async () => {
@@ -86,46 +109,8 @@ export default function LandingPage() {
     }
   }
 
-  const loadPurchasedQuizzes = async () => {
-    if (!user || loadPurchasedQuizzesRef.current) return
-
-    loadPurchasedQuizzesRef.current = true
-
-    try {
-      const result = await executeAuthQuery(async () => {
-        return await supabase
-          .from('purchases')
-          .select('quiz_id, purchased_at, quizzes:quizzes!purchases_quiz_id_fkey ( id, title, description )')
-          .eq('user_id', user.id)
-          .eq('status', 'completed')
-          .order('purchased_at', { ascending: false })
-      }, { maxRetries: 3, retryDelay: 1000 })
-
-      if (result.error) {
-        console.error('Error loading purchased quizzes:', result.error)
-        setPurchasedQuizzes([])
-      } else {
-        const typedData = (result.data || []).map((item: any) => ({
-          quiz_id: item.quiz_id,
-          purchased_at: item.purchased_at,
-          quizzes: item.quizzes,
-        }))
-        setPurchasedQuizzes(typedData)
-      }
-    } catch (error) {
-      console.error('Purchases fetch failed after retries:', error)
-      setPurchasedQuizzes([])
-    } finally {
-      loadPurchasedQuizzesRef.current = false
-    }
-  }
-
   const handleCategoryClick = (categoryId: string, categoryName: string) => {
     router.push(`/category?id=${categoryId}&name=${encodeURIComponent(categoryName)}`)
-  }
-
-  const startPurchasedQuiz = (quizId: string) => {
-    router.push(`/quiz?id=${quizId}`)
   }
 
   const handleAuthModalOpen = (mode: 'login' | 'register' | 'reset') => {
@@ -135,40 +120,12 @@ export default function LandingPage() {
 
   const handleSignOut = async () => {
     try {
-      await signOut()
-      setShowMyQuizzes(false)
-      setPurchasedQuizzes([])
-
-      try {
-        localStorage.clear()
-        sessionStorage.clear()
-        document.cookie.split(';').forEach((cookie) => {
-          document.cookie = cookie
-            .replace(/^ +/, '')
-            .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`)
-        })
-      } catch (storageError) {
-        console.log('Storage clear error:', storageError)
-      }
-
-      setTimeout(() => window.location.replace('/'), 200)
+      const { error } = await signOut()
+      if (error) throw error
+      router.replace('/')
     } catch (error) {
       console.error('Sign out error:', error)
-      try {
-        localStorage.clear()
-        sessionStorage.clear()
-      } catch {}
-      window.location.replace('/')
     }
-  }
-
-  if (loading || authLoading) {
-    return (
-      <div className="bl-page bl-loading" role="status" aria-live="polite">
-        <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
-        <p className="bl-kicker">Loading practice environment</p>
-      </div>
-    )
   }
 
   return (
@@ -181,14 +138,17 @@ export default function LandingPage() {
           </button>
 
           <div className="bl-header-actions">
-            {user ? (
+            {authLoading ? (
+              <div className="bl-header-skeleton" role="status" aria-label="Checking sign-in">
+                <span className="bl-skeleton-bar" />
+                <span className="bl-skeleton-bar" />
+              </div>
+            ) : user ? (
               <>
                 <span className="bl-user-label">
                   Signed in as <strong>{user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'learner'}</strong>
                 </span>
-                <button className="bl-button bl-button-quiet" onClick={() => setShowMyQuizzes(!showMyQuizzes)}>
-                  {showMyQuizzes ? 'Browse modules' : `My practice · ${purchasedQuizzes.length}`}
-                </button>
+                <button className="bl-button bl-button-quiet" onClick={() => document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' })}>Browse modules</button>
                 <button className="bl-button bl-button-quiet" onClick={() => router.push('/progress')}>Progress</button>
                 <button className="bl-text-button" onClick={handleSignOut}>Sign out</button>
               </>
@@ -203,26 +163,33 @@ export default function LandingPage() {
       </header>
 
       <main>
-        {!showMyQuizzes && (
-          <>
-            <section className="bl-hero">
+        <section className="bl-hero">
               <div className="bl-container bl-hero-grid">
                 <div className="bl-hero-copy">
                   <p className="bl-kicker">Fluency training for behaviour analysis</p>
-                  <h1>Know the terms.<br /><span>Build the fluency.</span></h1>
+                  <h1>Know the terms.<br /><span>Build your fluency.</span></h1>
                   <p className="bl-hero-lede">
                     Precision-designed practice for behaviour analysts who want knowledge that is accurate, rapid and ready when it matters.
                   </p>
                   <div className="bl-hero-actions">
                     <button
                       className="bl-button bl-button-primary"
-                      onClick={() => user ? document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' }) : handleAuthModalOpen('register')}
+                      onClick={() => continueQuiz
+                        ? router.push(`/quiz?id=${encodeURIComponent(continueQuiz.id)}`)
+                        : document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' })}
                     >
-                      {user ? 'Choose a module' : 'Start building fluency'}
+                      {continueQuiz ? 'Continue practice' : 'Explore modules'}
                       <ArrowRight size={17} strokeWidth={2} />
                     </button>
-                    {!user && <span className="bl-action-note">Account required to save progress</span>}
+                    {continueQuiz && (
+                      <button className="bl-hero-browse" onClick={() => document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' })}>
+                        Choose another quiz
+                      </button>
+                    )}
                   </div>
+                  <p className="bl-action-note" aria-live="polite">
+                    {continueQuiz ? `Your most recent practice: ${continueQuiz.title}` : continueLoading ? 'Finding your recent practice…' : 'Choose a content area to begin'}
+                  </p>
                   <div className="bl-proof-line" aria-label="Product features">
                     <span>Accuracy</span><i aria-hidden="true" /><span>Fluency</span><i aria-hidden="true" /><span>Retention</span>
                   </div>
@@ -246,44 +213,29 @@ export default function LandingPage() {
                   </div>
                 </div>
               </div>
-            </section>
+        </section>
 
-          </>
-        )}
-
-        {user && showMyQuizzes && (
-          <section className="bl-dashboard bl-container">
-            <div className="bl-page-heading"><p className="bl-kicker">Saved access</p><h1>Your practice</h1><p>Continue where you left off.</p></div>
-            {purchasedQuizzes.length === 0 ? (
-              <div className="bl-empty-state">
-                <span className="bl-empty-code">NO_SAVED_SETS</span><h2>Your practice list is empty.</h2><p>Browse the modules and choose a fluency set to begin.</p>
-                <button className="bl-button bl-button-primary" onClick={() => setShowMyQuizzes(false)}>Browse modules <ArrowRight size={17} /></button>
-              </div>
-            ) : (
-              <div className="bl-practice-grid">
-                {purchasedQuizzes.map((purchase) => (
-                  <article key={purchase.quiz_id} className="bl-practice-card">
-                    <span className="bl-card-number">READY</span><h2>{purchase.quizzes?.title}</h2><p>{purchase.quizzes?.description}</p>
-                    <span className="bl-card-meta">Added {new Date(purchase.purchased_at).toLocaleDateString()}</span>
-                    <button className="bl-button bl-button-primary" onClick={() => startPurchasedQuiz(purchase.quiz_id)}>Continue practice <ArrowRight size={17} /></button>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {!showMyQuizzes && (
-          <section id="modules" className="bl-modules">
+        <section id="modules" className="bl-modules">
             <div className="bl-container">
               <div className="bl-section-heading bl-section-heading-modules">
                 <div><p className="bl-kicker">BACB 6th Edition</p><h2>Choose your module.</h2></div>
                 <p>Practice by content area in supported options mode or independent typed mode.</p>
               </div>
 
-              {!user && <div className="bl-notice"><span className="bl-notice-mark" aria-hidden="true">i</span><span>Create an account to record attempts and chart your progress over time.</span></div>}
+              {!authLoading && !user && <div className="bl-notice"><span className="bl-notice-mark" aria-hidden="true">i</span><span>Create an account to record attempts and chart your progress over time.</span></div>}
 
-              {categories.length === 0 ? (
+              {loading ? (
+                <div className="bl-module-grid" role="status" aria-live="polite">
+                  <span className="sr-only">Loading modules</span>
+                  {[1, 2, 3].map((item) => (
+                    <div key={item} className="bl-module-card bl-module-skeleton" aria-hidden="true">
+                      <span className="bl-skeleton-bar" />
+                      <span className="bl-skeleton-bar" />
+                      <span className="bl-skeleton-bar" />
+                    </div>
+                  ))}
+                </div>
+              ) : categories.length === 0 ? (
                 <div className="bl-empty-state"><span className="bl-empty-code">CONTENT_LOADING</span><h2>New modules are in preparation.</h2><p>More behaviour-analytic fluency content is coming soon.</p></div>
               ) : (
                 <div className="bl-module-grid">
@@ -300,11 +252,9 @@ export default function LandingPage() {
                 </div>
               )}
             </div>
-          </section>
-        )}
+        </section>
 
-        {!showMyQuizzes && (
-          <section className="bl-features">
+        <section className="bl-features">
             <div className="bl-container">
               <div className="bl-section-heading">
                 <div><p className="bl-kicker">What makes it different</p><h2>A learning system, not just a term bank.</h2></div>
@@ -314,8 +264,8 @@ export default function LandingPage() {
                 <article className="bl-feature-card">
                   <span className="bl-feature-code">01 / PERFORMANCE</span>
                   <h3>See the learning curve.</h3>
-                  <p>Accuracy, response rate and celeration are graphed across attempts. Predictive modelling helps estimate where performance is heading—not simply where it has been.</p>
-                  <div className="bl-feature-tags"><span>Graphs</span><span>Trends</span><span>Projections</span></div>
+                  <p>Review your quiz accuracy and response rate over time, and see how your practice is changing.</p>
+                  <div className="bl-feature-tags"><span>Graphs</span><span>Progress</span><span>Feedback</span></div>
                 </article>
                 <article className="bl-feature-card">
                   <span className="bl-feature-code">02 / FLUENCY</span>
@@ -326,24 +276,21 @@ export default function LandingPage() {
                 <article className="bl-feature-card">
                   <span className="bl-feature-code">03 / CONTINGENCIES</span>
                   <h3>Make progress consequential.</h3>
-                  <p>Leaderboards and within-session task changes support sustained practice. As a timing advances, higher-effort demands are progressively removed, arranging task relief as a negative-reinforcement contingency.</p>
-                  <div className="bl-feature-tags"><span>Leaderboard</span><span>Task shaping</span><span>Reinforcement</span></div>
+                  <p>Short practice sessions and clear feedback help you return to the terms that need more work.</p>
+                  <div className="bl-feature-tags"><span>Practice</span><span>Review</span><span>Feedback</span></div>
                 </article>
               </div>
             </div>
-          </section>
-        )}
+        </section>
 
-        {!showMyQuizzes && (
-          <section className="bl-credibility">
+        <section className="bl-credibility">
             <div className="bl-container bl-credibility-inner">
               <p className="bl-kicker">Built from behavioural science</p>
               <h2>Serious practice. Clear feedback. No gimmicks.</h2>
               <p>BehaviorLingo is created by Dr Richard May, BCBA-D and Associate Professor of Behaviour Analysis, to bring fluency-based learning into everyday professional study.</p>
               <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer">About Dr May <ArrowRight size={16} /></a>
             </div>
-          </section>
-        )}
+        </section>
       </main>
 
       <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} mode={authMode} onSwitchMode={(newMode: 'login' | 'register' | 'reset') => setAuthMode(newMode)} />
@@ -352,7 +299,7 @@ export default function LandingPage() {
         <div className="bl-container bl-footer-inner">
           <div><div className="bl-footer-wordmark">behavior<span>lingo</span></div><p>Fluency training for behaviour analysis.</p></div>
           <div className="bl-footer-links">
-            <button onClick={() => router.push('/about')}>About</button><button onClick={() => router.push('/privacy')}>Privacy</button><button onClick={() => router.push('/terms')}>Terms</button>
+            <button onClick={() => router.push('/privacy')}>Privacy</button><button onClick={() => router.push('/terms')}>Terms</button>
             <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer">Dr May</a>
           </div>
           <span className="bl-copyright">© 2026 BehaviorLingo</span>

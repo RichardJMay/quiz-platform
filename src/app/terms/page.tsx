@@ -1,56 +1,25 @@
-// app/terms/page.tsx
-'use client'
-
-import PageLayout from '@/components/layout/PageLayout'
+import LegalLayout from '@/components/layout/LegalLayout'
 
 export default function TermsPage() {
   return (
-    <PageLayout>
-      <div className="max-w-3xl mx-auto px-4 py-12">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Terms of Use</h1>
-        <p className="text-gray-600 mb-8">Effective: 20 September 2025</p>
-
-        <div className="space-y-6 text-gray-800 leading-relaxed">
-          <p>
-            These short terms apply to the <strong>optibl</strong> pilot. The service is provided free of charge for testing and feedback.
-          </p>
-
-          <section>
-            <h2 className="text-xl font-semibold mb-2">Use of the service</h2>
-            <ul className="list-disc list-inside space-y-1">
-              <li>Don’t disrupt, reverse engineer, or misuse the site.</li>
-              <li>Don’t upload unlawful or harmful content.</li>
-              <li>We may change or suspend the pilot at any time.</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold mb-2">Your data</h2>
-            <p>
-              See our <a href="/privacy" className="text-blue-600 hover:underline">Privacy Notice</a> for how we handle data during the pilot. You can request deletion at any time by email.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold mb-2">Changes</h2>
-            <p>
-              We may update these terms during the pilot and will post the latest version here. Continued use means you accept the updated terms.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-semibold mb-2">Contact</h2>
-            <p>
-              Questions: <a className="text-blue-600 hover:underline" href="mailto:richard.may@southwales.ac.uk">richard.may@southwales.ac.uk</a>
-              {/* TODO: replace with your preferred email */}
-            </p>
-          </section>
-
-          <p className="text-sm text-gray-500">
-           
-          </p>
-        </div>
-      </div>
-    </PageLayout>
+    <LegalLayout title="Terms of Use" label="Using the site">
+      <p>BehaviorLingo is operated personally by Dr Richard May. The service provides behaviour analysis study practice and is intended for adults aged 18 or over.</p>
+      <section>
+        <h2 className="text-xl font-semibold mb-2">Your account</h2>
+        <p>Provide an email address you control, keep your sign-in details secure, and do not share your account. Contact us if you suspect someone else has accessed it.</p>
+      </section>
+      <section>
+        <h2 className="text-xl font-semibold mb-2">Using the service</h2>
+        <p>Use BehaviorLingo for lawful personal study. Do not interfere with the service, other learners’ accounts or data. Practice scores and estimates are study feedback; they do not guarantee exam results or professional certification.</p>
+      </section>
+      <section>
+        <h2 className="text-xl font-semibold mb-2">Changes and availability</h2>
+        <p>We may improve or change study features. If a change materially affects your account or access, we will give appropriate notice. You can stop using the service and request account deletion at any time.</p>
+      </section>
+      <section>
+        <h2 className="text-xl font-semibold mb-2">Privacy and contact</h2>
+        <p>See the <a href="/privacy" className="underline">Privacy Notice</a> for how your information is used. Questions can be sent to <a className="underline" href="mailto:richard.may@southwales.ac.uk">richard.may@southwales.ac.uk</a>.</p>
+      </section>
+    </LegalLayout>
   )
 }

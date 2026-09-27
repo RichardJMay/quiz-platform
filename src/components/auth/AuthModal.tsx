@@ -16,6 +16,7 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
+  const [adultConfirmed, setAdultConfirmed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -43,8 +44,8 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
           }, 1000)
         }
       } else if (mode === 'register') {
-        if (!fullName.trim()) {
-          setError('Please enter your full name')
+        if (!adultConfirmed) {
+          setError('You must be 18 or over to create an account')
           return
         }
         
@@ -79,6 +80,7 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
     setEmail('')
     setPassword('')
     setFullName('')
+    setAdultConfirmed(false)
     setError('')
     setMessage('')
     setShowLoginSuggestion(false)
@@ -139,14 +141,13 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
           {mode === 'register' && (
             <div>
               <label htmlFor="fullName" className="block text-sm font-medium text-gray-700">
-                Full Name
+                Name (optional)
               </label>
               <input
                 type="text"
                 id="fullName"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                required
                 className="mt-1 block w-full px-3 py-3 text-base text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 placeholder-gray-500"
                 placeholder="Enter your full name"
               />
@@ -183,6 +184,16 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode }: AuthM
                 className="mt-1 block w-full px-3 py-3 text-base text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 placeholder-gray-500"
                 placeholder="Enter your password"
               />
+            </div>
+          )}
+
+          {mode === 'register' && (
+            <div className="space-y-2 text-sm text-gray-700">
+              <label className="flex gap-2 items-start">
+                <input type="checkbox" checked={adultConfirmed} onChange={(e) => setAdultConfirmed(e.target.checked)} required className="mt-1" />
+                <span>I confirm I am at least 18 years old.</span>
+              </label>
+              <p>By creating an account, you agree to the <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline">Terms of Use</a>. Read the <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline">Privacy Notice</a> to see how your data is used.</p>
             </div>
           )}
 

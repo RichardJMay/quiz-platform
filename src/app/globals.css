@@ -283,6 +283,26 @@ a:focus-visible {
   font-size: 0.72rem;
 }
 
+.bl-hero-copy > .bl-action-note {
+  margin: 13px 0 0;
+}
+
+.bl-hero-browse {
+  padding: 8px 2px;
+  color: var(--bl-forest-deep);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  cursor: pointer;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.bl-hero-browse:hover {
+  color: var(--bl-moss);
+}
+
 .bl-proof-line {
   margin-top: 46px;
   display: flex;
@@ -1002,11 +1022,43 @@ a:focus-visible {
 }
 
 .bl-quiz-card h3 {
-  margin: 21px 0 8px;
+  margin: 12px 0 8px;
   font-size: 1.05rem;
   font-weight: 680;
   letter-spacing: -0.025em;
   line-height: 1.25;
+}
+
+.bl-pathway-intro {
+  margin-top: 12px !important;
+  font-weight: 650;
+}
+
+.bl-pathway-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--bl-forest);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.bl-pathway-line strong {
+  padding: 3px 6px;
+  color: var(--bl-forest-deep);
+  background: var(--bl-accent);
+}
+
+.bl-tasklist-codes {
+  margin: 8px 0 0;
+  color: var(--bl-forest);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  line-height: 1.5;
 }
 
 .bl-quiz-description {
@@ -3585,4 +3637,193 @@ a:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Legal pages use the same visual language as the BehaviorLingo home page. */
+.bl-legal-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.bl-legal-main {
+  flex: 1;
+  width: min(880px, calc(100% - 40px));
+  padding-block: clamp(48px, 7vw, 90px) clamp(80px, 9vw, 124px);
+}
+
+.bl-legal-heading {
+  margin-bottom: 28px;
+}
+
+.bl-legal-heading h1 {
+  margin: 18px 0 22px;
+  color: var(--bl-ink);
+  font-size: clamp(2.7rem, 6vw, 5rem);
+  font-weight: 670;
+  letter-spacing: -0.065em;
+  line-height: 1;
+}
+
+.bl-legal-date {
+  display: inline-block;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--bl-lcd-light);
+  background: var(--bl-forest);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.055em;
+}
+
+.bl-legal-content {
+  padding: clamp(25px, 5vw, 48px);
+  color: var(--bl-ink-soft);
+  background: var(--bl-white);
+  border: 1px solid var(--bl-ink);
+  box-shadow: 7px 7px 0 rgba(33, 74, 54, 0.18);
+  font-size: 1rem;
+  line-height: 1.75;
+  counter-reset: legal-section;
+}
+
+.bl-legal-content > p {
+  max-width: 68ch;
+  margin: 0 0 28px;
+}
+
+.bl-legal-content section {
+  padding: 26px 0;
+  border-top: 1px solid var(--bl-line);
+  counter-increment: legal-section;
+}
+
+.bl-legal-content section:last-child {
+  padding-bottom: 0;
+}
+
+.bl-legal-content h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin: 0 0 12px;
+  color: var(--bl-forest-deep);
+  font-size: clamp(1.15rem, 2vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.3;
+}
+
+.bl-legal-content h2::before {
+  content: counter(legal-section, decimal-leading-zero) " /";
+  flex: 0 0 auto;
+  color: var(--bl-moss);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.bl-legal-content section p {
+  max-width: 68ch;
+  margin: 0;
+}
+
+.bl-legal-content a {
+  color: var(--bl-forest);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.bl-legal-content a:hover {
+  color: var(--bl-ink);
+  text-decoration-thickness: 2px;
+}
+
+@media (max-width: 650px) {
+  .bl-legal-main {
+    width: min(100% - 28px, 880px);
+  }
+
+  .bl-legal-content h2 {
+    gap: 9px;
+  }
+}
+
+/* Keep the home page visible while account and module data load. */
+.bl-header-skeleton {
+  min-height: 37px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bl-skeleton-bar {
+  display: block;
+  background: var(--bl-lcd);
+  opacity: 0.55;
+  border-radius: 2px;
+}
+
+.bl-header-skeleton .bl-skeleton-bar:first-child {
+  width: 84px;
+  height: 12px;
+}
+
+.bl-header-skeleton .bl-skeleton-bar:last-child {
+  width: 110px;
+  height: 36px;
+  border: 1px solid rgba(251, 252, 245, 0.45);
+  background: transparent;
+}
+
+.bl-module-skeleton,
+.bl-module-skeleton:hover {
+  cursor: default;
+  transform: none;
+  background: rgba(251, 252, 245, 0.86);
+  box-shadow: 6px 6px 0 rgba(33, 74, 54, 0.18);
+}
+
+.bl-module-skeleton .bl-skeleton-bar:first-child {
+  width: 76px;
+  height: 11px;
+}
+
+.bl-module-skeleton .bl-skeleton-bar:nth-child(2) {
+  width: min(70%, 260px);
+  height: 27px;
+  margin-top: 34px;
+}
+
+.bl-module-skeleton .bl-skeleton-bar:last-child {
+  width: min(48%, 190px);
+  height: 13px;
+  margin-top: auto;
+}
+
+.bl-quiz-signin main {
+  max-width: 760px;
+  min-height: 70vh;
+  padding-block: clamp(90px, 12vw, 150px);
+}
+
+.bl-quiz-signin h1 {
+  margin: 20px 0 16px;
+  font-size: clamp(2.6rem, 6vw, 4.5rem);
+  letter-spacing: -0.06em;
+  line-height: 1;
+}
+
+.bl-quiz-signin main > p:not(.bl-kicker) {
+  color: var(--bl-ink-soft);
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.bl-quiz-signin .bl-hero-actions {
+  margin-block: 30px;
 }

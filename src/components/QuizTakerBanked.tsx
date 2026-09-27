@@ -4,13 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { getPackGuide } from '@/lib/quiz-pathway'
 
 interface Quiz {
   id: string
   title: string
   description: string
-  is_free: boolean
-  price: number
 }
 
 interface Term {
@@ -25,6 +24,8 @@ interface BankedQuestion {
   hint?: string | null
   correct_term_id: string
 }
+
+type TimingResult = { minutes: number; rate: number; percentage: number; saved: boolean; complete: boolean }
 
 // Fisher–Yates
 function shuffle<T>(arr: T[]): T[] {
@@ -60,6 +61,9 @@ export default function QuizTakerBanked() {
 
   const [score, setScore] = useState(0)
   const [quizCompleted, setQuizCompleted] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [result, setResult] = useState<TimingResult | null>(null)
+  const finishingRef = useRef(false)
   const [loading, setLoading] = useState(false)
   const [startTime, setStartTime] = useState<Date | null>(null)
 
@@ -81,7 +85,7 @@ export default function QuizTakerBanked() {
   const loadQuizzes = async () => {
     const { data, error } = await supabase
       .from('quizzes')
-      .select('id, title, description, is_free, price, quiz_mode, is_listed')
+      .select('id, title, description, quiz_mode, is_listed')
       .eq('quiz_mode', 'banked')
       .eq('is_listed', true)
       .order('created_at', { ascending: false })
@@ -89,8 +93,7 @@ export default function QuizTakerBanked() {
     if (error) {
       console.error('Error loading quizzes:', error)
     } else {
-      const freeQuizzes = (data || []).filter(q => q.is_free)
-      setQuizzes(freeQuizzes as Quiz[])
+      setQuizzes((data || []) as Quiz[])
     }
   }
 
@@ -99,7 +102,7 @@ export default function QuizTakerBanked() {
     try {
       const { data: quiz, error: quizError } = await supabase
         .from('quizzes')
-        .select('id, title, description, is_free, price, quiz_mode, is_listed')
+        .select('id, title, description, quiz_mode, is_listed')
         .eq('id', id)
         .eq('is_listed', true)
         .single()
@@ -114,8 +117,6 @@ export default function QuizTakerBanked() {
         id: quiz.id,
         title: quiz.title,
         description: quiz.description,
-        is_free: quiz.is_free,
-        price: quiz.price,
       })
     } catch (err) {
       console.error('Error loading quiz:', err)
@@ -164,6 +165,8 @@ export default function QuizTakerBanked() {
       setHintShown(false)
       setScore(0)
       setQuizCompleted(false)
+      setResult(null)
+      finishingRef.current = false
       setStartTime(new Date())
       startIdleTimers()
     } catch (err) {
@@ -200,6 +203,7 @@ export default function QuizTakerBanked() {
   }
 
   const startIdleTimers = () => {
+    if (finishingRef.current) return
     clearIdleTimers()
     setIdleWarning(false)
     idleWarnTimerRef.current = setTimeout(() => setIdleWarning(true), IDLE_WARNING_MS)
@@ -208,15 +212,7 @@ export default function QuizTakerBanked() {
     }, IDLE_TIMEOUT_MS)
   }
 
-  const finalizeTimedOutAttempt = async () => {
-    clearIdleTimers()
-    if (quizCompleted) return
-    try {
-      await saveQuizAttempt()
-    } finally {
-      setQuizCompleted(true)
-    }
-  }
+  const finalizeTimedOutAttempt = () => { void finishTiming(false) }
 
   useEffect(() => {
     const inQuiz = !!selectedQuiz && questions.length > 0 && !quizCompleted
@@ -285,19 +281,26 @@ export default function QuizTakerBanked() {
       setShowFeedback(false)
       setHintShown(false)
     } else {
-      saveQuizAttempt()
-      setQuizCompleted(true)
+      void finishTiming(true)
     }
   }
 
-  const saveQuizAttempt = async () => {
-    if (!selectedQuiz || !startTime) return
-
-    const endTime = new Date()
-    const totalTimeMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60)
+  const finishTiming = async (complete: boolean) => {
+    if (finishingRef.current || !selectedQuiz || !startTime || questions.length === 0) return
+    finishingRef.current = true
+    clearIdleTimers()
+    const totalTimeMinutes = Math.max(0, (Date.now() - startTime.getTime()) / (1000 * 60))
     const accuracyPercentage = Math.round((score / questions.length) * 100)
     const fluencyRate = totalTimeMinutes > 0 ? score / totalTimeMinutes : 0
+    setSaving(complete)
+    const saved = complete ? await saveQuizAttempt(totalTimeMinutes, accuracyPercentage, fluencyRate) : false
+    setResult({ minutes: totalTimeMinutes, rate: fluencyRate, percentage: accuracyPercentage, saved, complete })
+    setSaving(false)
+    setQuizCompleted(true)
+  }
 
+  const saveQuizAttempt = async (totalTimeMinutes: number, accuracyPercentage: number, fluencyRate: number): Promise<boolean> => {
+    if (!selectedQuiz) return false
     const attemptData = {
       user_email: user?.email || 'anonymous',
       quiz_id: selectedQuiz.id,
@@ -318,9 +321,12 @@ export default function QuizTakerBanked() {
 
       if (error) {
         console.error('Error saving quiz attempt:', error)
+        return false
       }
+      return true
     } catch (error) {
       console.error('Error in saveQuizAttempt:', error)
+      return false
     }
   }
 
@@ -335,6 +341,9 @@ export default function QuizTakerBanked() {
     setShowFeedback(false)
     setScore(0)
     setQuizCompleted(false)
+    setSaving(false)
+    setResult(null)
+    finishingRef.current = false
     setStudentName('')
     setStartTime(null)
     setIdleWarning(false)
@@ -349,11 +358,10 @@ export default function QuizTakerBanked() {
     )
   }
 
-  if (quizCompleted) {
-    const percentage = Math.round((score / questions.length) * 100)
-    const endTime = new Date()
-    const totalQuizTimeMinutes = startTime ? (endTime.getTime() - startTime.getTime()) / (1000 * 60) : 0
-    const correctResponsesPerMinute = totalQuizTimeMinutes > 0 ? score / totalQuizTimeMinutes : 0
+  if (quizCompleted && result) {
+    const percentage = result.percentage
+    const totalQuizTimeMinutes = result.minutes
+    const correctResponsesPerMinute = result.rate
 
     const isAbove = correctResponsesPerMinute >= threshold
     const completionRateWidth = Math.min(100, (correctResponsesPerMinute / maxBarRate) * 100)
@@ -370,11 +378,15 @@ export default function QuizTakerBanked() {
         </header>
         <main className="bl-session-shell bl-complete-wrap">
           <section className="bl-complete-panel">
-            <p className="bl-kicker">Session complete</p>
-            <h1>Timing logged.</h1>
-            <p className="bl-complete-lede">Your latest run has been added to your performance record.</p>
+            <p className="bl-kicker">{result.complete ? 'Session complete' : 'Session ended'}</p>
+            <h1>{result.saved ? 'Timing logged.' : result.complete ? 'Save not confirmed.' : 'Timing incomplete.'}</h1>
+            <p className="bl-complete-lede" role="status">{result.saved
+              ? 'Your latest run has been added to your performance record.'
+              : result.complete
+                ? 'We could not confirm that this timing was saved. Please check your progress before starting another.'
+                : 'This timing ended after inactivity and was not added to your performance record.'}</p>
 
-            <div className="bl-result-grid">
+            {result.complete && <div className="bl-result-grid">
               <div className="bl-result-cell">
                 <span>Accuracy</span><strong>{percentage}%</strong><small>{score}/{questions.length} correct</small>
               </div>
@@ -384,9 +396,9 @@ export default function QuizTakerBanked() {
               <div className="bl-result-cell">
                 <span>Duration</span><strong>{totalQuizTimeMinutes.toFixed(1)}</strong><small>minutes</small>
               </div>
-            </div>
+            </div>}
 
-            <div className="bl-analysis-panel">
+            {result.complete && <div className="bl-analysis-panel">
               <div className="bl-analysis-heading">
                 <div><span>Fluency aim</span><strong>{isAbove ? 'Aim reached' : 'Building toward aim'}</strong></div>
                 <b>{correctResponsesPerMinute.toFixed(1)} / {threshold}</b>
@@ -396,7 +408,7 @@ export default function QuizTakerBanked() {
                 <i style={{ left: `${(threshold / maxBarRate) * 100}%` }} />
               </div>
               <p>{isAbove ? 'You reached the current fluency aim. Repeat the pack to strengthen retention.' : 'Prioritise accurate responding; speed should increase as the terms become more familiar.'}</p>
-            </div>
+            </div>}
 
             <div className="bl-session-actions">
               <button onClick={() => router.push('/')} className="bl-button bl-button-secondary">Return home</button>
@@ -410,6 +422,7 @@ export default function QuizTakerBanked() {
 
   if (selectedQuiz && questions.length === 0) {
     const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student'
+    const guide = getPackGuide(selectedQuiz.title)
 
     return (
       <div className="bl-page bl-session-page">
@@ -424,7 +437,8 @@ export default function QuizTakerBanked() {
             <div className="bl-start-copy">
               <p className="bl-kicker">Fluency timing · Options</p>
               <h1>{selectedQuiz.title}</h1>
-              <p>{selectedQuiz.description}</p>
+              <p>{guide?.theme || selectedQuiz.description}</p>
+              {guide && <p className="bl-tasklist-codes">Task-list areas: {guide.codes}</p>}
               {user && <div className="bl-ready-label">Ready, <strong>{displayName}</strong></div>}
             </div>
             <div className="bl-start-console">
@@ -451,7 +465,7 @@ export default function QuizTakerBanked() {
         <header className="bl-session-topbar">
           <div className="bl-session-shell bl-session-topbar-inner">
             <div className="bl-session-title"><span>Options sprint</span><strong>{selectedQuiz.title}</strong></div>
-            <button onClick={() => router.push('/')} className="bl-session-exit">Exit timing</button>
+            <button onClick={() => router.push('/')} disabled={saving} className="bl-session-exit">Exit timing</button>
           </div>
         </header>
 
@@ -528,9 +542,10 @@ export default function QuizTakerBanked() {
                 ) : (
                   <button
                     onClick={nextQuestion}
+                    disabled={saving}
                     className="bl-button"
                   >
-                    {currentQuestionIndex < questions.length - 1 ? 'Next definition' : 'Finish timing'} <span>→</span>
+                    {saving ? 'Saving timing…' : currentQuestionIndex < questions.length - 1 ? 'Next definition' : 'Finish timing'} <span>→</span>
                   </button>
                 )}
               </div>
@@ -563,7 +578,7 @@ export default function QuizTakerBanked() {
         ) : (
           quizzes.map((quiz) => (
             <div key={quiz.id} className="bl-selection-item">
-              <div><h3>{quiz.title}</h3><p>{quiz.description}</p></div>
+              <div><h3>{quiz.title}</h3><p>{getPackGuide(quiz.title)?.theme || quiz.description}</p></div>
               <button onClick={() => startQuiz(quiz)} className="bl-button">Start <span>→</span></button>
             </div>
           ))

@@ -3,10 +3,10 @@
 import { useEffect, useState, Suspense, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
-import PaymentButton from '@/components/payment/PaymentButton'
 import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '@/contexts/AuthContext'
 import { ArrowLeft } from 'lucide-react'
+import { getPackGuide, pathwayOrder } from '@/lib/quiz-pathway'
 
 type QuizMode = 'mcq' | 'banked'
 type ResponseMode = 'options' | 'typed' | null
@@ -15,8 +15,6 @@ interface Quiz {
   id: string
   title: string
   description: string
-  price: number
-  is_free: boolean
   category_id: string
   is_listed?: boolean
   quiz_mode?: QuizMode
@@ -29,11 +27,6 @@ interface Category {
   description: string
   icon_name: string
   color_class: string
-}
-
-interface PurchasedQuiz {
-  quiz_id: string
-  purchased_at: string
 }
 
 interface AttemptRow {
@@ -51,8 +44,8 @@ type PerfStats = {
 function CategoryPageContent() {
   const [category, setCategory] = useState<Category | null>(null)
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
-  const [purchasedQuizzes, setPurchasedQuizzes] = useState<PurchasedQuiz[]>([])
   const [perfByQuiz, setPerfByQuiz] = useState<Record<string, PerfStats>>({})
+  const [performanceUserId, setPerformanceUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login')
@@ -69,10 +62,9 @@ function CategoryPageContent() {
     if (categoryId) {
       void loadCategory()
       void loadCategoryQuizzes()
-      if (user) void loadPurchasedQuizzes()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryId, user?.id])
+  }, [categoryId])
 
   const loadCategory = async () => {
     const { data } = await supabase
@@ -86,7 +78,7 @@ function CategoryPageContent() {
   const loadCategoryQuizzes = async () => {
     const { data } = await supabase
       .from('quizzes')
-      .select('id, title, description, price, is_free, category_id, is_listed, quiz_mode, response_mode')
+      .select('id, title, description, category_id, is_listed, quiz_mode, response_mode')
       .eq('category_id', categoryId)
       .eq('is_listed', true)
       .order('created_at', { ascending: false })
@@ -95,19 +87,10 @@ function CategoryPageContent() {
     setLoading(false)
   }
 
-  const loadPurchasedQuizzes = async () => {
-    if (!user) return
-    const { data } = await supabase
-      .from('purchases')
-      .select('quiz_id, purchased_at')
-      .eq('user_id', user.id)
-      .eq('status', 'completed')
-
-    setPurchasedQuizzes(data || [])
-  }
-
   useEffect(() => {
     const loadPerformanceData = async () => {
+      setPerformanceUserId(null)
+      setPerfByQuiz({})
       if (!user || quizzes.length === 0) return
       const { data, error } = await supabase
         .from('quiz_attempts')
@@ -135,12 +118,17 @@ function CategoryPageContent() {
         }
       })
       setPerfByQuiz(stats)
+      setPerformanceUserId(user.id)
     }
 
     void loadPerformanceData()
   }, [user?.id, quizzes])
 
   const startQuiz = (quizId: string) => {
+    if (!user) {
+      handleAuthModalOpen('register')
+      return
+    }
     if (navigatingRef.current) return
     navigatingRef.current = true
     router.push(`/quiz?id=${quizId}`)
@@ -156,39 +144,26 @@ function CategoryPageContent() {
 
   const handleSignOut = async () => {
     try {
-      await signOut()
-      setPurchasedQuizzes([])
-      try {
-        localStorage.clear()
-        sessionStorage.clear()
-        document.cookie.split(';').forEach((cookie) => {
-          document.cookie = cookie
-            .replace(/^ +/, '')
-            .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`)
-        })
-      } catch {}
-      setTimeout(() => window.location.replace('/'), 200)
-    } catch {
-      try {
-        localStorage.clear()
-        sessionStorage.clear()
-      } catch {}
-      window.location.replace('/')
+      const { error } = await signOut()
+      if (error) throw error
+      router.replace('/')
+    } catch (error) {
+      console.error('Sign out error:', error)
     }
   }
 
   const bankedOptions = useMemo(
-    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && (quiz.response_mode ?? 'options') === 'options'),
+    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && (quiz.response_mode ?? 'options') === 'options').sort(pathwayOrder),
     [quizzes]
   )
 
   const bankedTyped = useMemo(
-    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed'),
+    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed').sort(pathwayOrder),
     [quizzes]
   )
 
-  const SmallQuizCard = ({ quiz }: { quiz: Quiz }) => {
-    const isOwned = Boolean(user && purchasedQuizzes.some(purchase => purchase.quiz_id === quiz.id))
+  const SmallQuizCard = ({ quiz, position, suggested }: { quiz: Quiz; position: number; suggested: boolean }) => {
+    const guide = getPackGuide(quiz.title)
     const performance = perfByQuiz[quiz.id]
     const accuracy = performance?.bestAccuracy ?? null
     const fluency = performance?.bestFluency ?? null
@@ -215,8 +190,13 @@ function CategoryPageContent() {
           <span className="bl-state-label"><i aria-hidden="true" />{stateLabel}</span>
         </div>
 
+        <div className="bl-pathway-line">
+          <span>{guide ? `Suggested order ${position}` : 'More practice'}</span>
+          {suggested && <strong>{user ? 'Suggested next' : 'Start here'}</strong>}
+        </div>
         <h3>{quiz.title}</h3>
-        {quiz.description && <p className="bl-quiz-description">{quiz.description}</p>}
+        {(guide?.theme || quiz.description) && <p className="bl-quiz-description">{guide?.theme || quiz.description}</p>}
+        {guide && <p className="bl-tasklist-codes">Task-list areas: {guide.codes}</p>}
 
         <dl className="bl-quiz-metrics">
           <div><dt>Best accuracy</dt><dd>{bestAccuracy}</dd></div>
@@ -225,22 +205,10 @@ function CategoryPageContent() {
         </dl>
 
         <div className="bl-quiz-card-bottom">
-          <span className="bl-access-label">{quiz.is_free ? 'Included' : quiz.price ? `£${quiz.price}` : 'Paid access'}</span>
-          {isOwned ? (
-            <button className="bl-button bl-card-action" onClick={() => startQuiz(quiz.id)}>Practise again</button>
-          ) : quiz.is_free ? (
-            <button className="bl-button bl-card-action" onClick={() => startQuiz(quiz.id)}>Start practice</button>
-          ) : (
-            <div className="bl-payment-wrap">
-              <PaymentButton
-                quizId={quiz.id}
-                price={quiz.price}
-                title={quiz.title}
-                className="bl-card-action"
-                onAuthRequired={() => handleAuthModalOpen('register')}
-              />
-            </div>
-          )}
+          <span className="bl-access-label">Account access</span>
+          <button className="bl-button bl-card-action" onClick={() => startQuiz(quiz.id)}>
+            {performance?.bestAccuracy !== null && performance?.bestAccuracy !== undefined ? 'Practise again' : 'Start practice'}
+          </button>
         </div>
       </article>
     )
@@ -258,7 +226,21 @@ function CategoryPageContent() {
     title: string
     description: string
     items: Quiz[]
-  }) => (
+  }) => {
+    const guided = items.filter(item => getPackGuide(item.title))
+    const hasPerformance = Boolean(user && performanceUserId === user.id)
+    const next = !user
+      ? guided[0]
+      : hasPerformance
+        ? guided.find(item => perfByQuiz[item.id]?.bestAccuracy === null)
+          ?? guided.find(item => {
+            const stats = perfByQuiz[item.id]
+            return stats && (stats.bestAccuracy !== 100 || (stats.bestFluency ?? 0) < (mode === 'typed' ? 6 : 15))
+          })
+          ?? guided[0]
+        : undefined
+
+    return (
     <section
       id={`practice-${mode}`}
       className={`bl-practice-column ${mobileMode === mode ? 'bl-mobile-active' : 'bl-mobile-inactive'}`}
@@ -275,10 +257,11 @@ function CategoryPageContent() {
       {items.length === 0 ? (
         <div className="bl-column-empty">No practice sets available yet.</div>
       ) : (
-        <div className="bl-quiz-list">{items.map(quiz => <SmallQuizCard key={quiz.id} quiz={quiz} />)}</div>
+        <div className="bl-quiz-list">{items.map((quiz, index) => <SmallQuizCard key={quiz.id} quiz={quiz} position={index + 1} suggested={quiz.id === next?.id} />)}</div>
       )}
     </section>
-  )
+    )
+  }
 
   const displayName = user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Learner'
   const accountInitial = displayName.charAt(0).toUpperCase()
@@ -350,6 +333,7 @@ function CategoryPageContent() {
             <div className="bl-category-code">CONTENT_AREA</div>
             <h1>{category?.name || 'Fluency practice'}</h1>
             <p>{category?.description}</p>
+            {quizzes.length > 0 && <p className="bl-pathway-intro">Follow the suggested sequence, or choose any practice set that fits what you want to study now.</p>}
             <div className="bl-category-meta">
               <span><i aria-hidden="true" /> Options aim: 15/min</span>
               <span><i aria-hidden="true" /> Typed aim: 6/min</span>
@@ -425,7 +409,6 @@ function CategoryPageContent() {
         <div className="bl-container bl-footer-inner">
           <div><div className="bl-footer-wordmark">behavior<span>lingo</span></div><p>Fluency training for behaviour analysis.</p></div>
           <div className="bl-footer-links">
-            <button onClick={() => router.push('/about')}>About</button>
             <button onClick={() => router.push('/privacy')}>Privacy</button>
             <button onClick={() => router.push('/terms')}>Terms</button>
             <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer">Dr May</a>

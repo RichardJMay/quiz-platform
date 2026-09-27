@@ -10,19 +10,18 @@ type LeaderRow = {
   quiz_id: string;
   title: string;
   yourBestRaw: number;     // best fluency (you)
-  globalBestRaw: number;   // best fluency (global)
+  globalBestRaw: number | null;   // best fluency (global), if available
   yourBestStreak: number;  // best daily streak (you, per quiz)
   yourCurrentStreak: number; // current daily streak (you, per quiz)
 };
 
 // --- helpers (Europe/London day bucketing + streaks) ---
 const toLondonDateKey = (iso: string) => {
-  // ISO -> Europe/London local calendar day "YYYY-MM-DD"
-  const d = new Date(new Date(iso).toLocaleString('en-US', { timeZone: 'Europe/London' }));
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(iso));
+  const part = (type: string) => parts.find(value => value.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
 };
 
 const addDaysKey = (yyyyMmDd: string, delta: number) => {
@@ -79,18 +78,24 @@ function computeBestAndCurrentStreak(londonDayKeys: string[]): { best: number; c
 }
 
 export default function LeaderboardPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [rows, setRows] = useState<LeaderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) { router.push('/'); return; }
+    if (authLoading) return;
+    setRows([]);
+    setLoadError(false);
+    setLoadedUserId(null);
+    if (!user) { router.replace('/'); return; }
+
+    let cancelled = false;
 
     (async () => {
       setLoading(true);
-      setLoadError(false);
       try {
         // 1) Your attempts (quiz-specific scope: only quizzes you've actually played)
         const { data: attempts, error } = await supabase
@@ -124,7 +129,7 @@ export default function LeaderboardPage() {
         });
 
         const quizIds = Array.from(yourByQuiz.keys());
-        if (quizIds.length === 0) { setRows([]); return; }
+        if (quizIds.length === 0) { if (!cancelled) setRows([]); return; }
 
         // 3) Global best fluency for these quizzes (keep your existing RPC)
         const { data: gbRows, error: gErr } = await supabase.rpc('get_global_bests', { quiz_ids: quizIds });
@@ -143,7 +148,7 @@ export default function LeaderboardPage() {
               quiz_id: qid,
               title: y.title,
               yourBestRaw: y.bestFluency,
-              globalBestRaw: globalBestFluency.get(qid) ?? y.bestFluency,
+              globalBestRaw: globalBestFluency.get(qid) ?? null,
               yourBestStreak,
               yourCurrentStreak
             };
@@ -151,20 +156,25 @@ export default function LeaderboardPage() {
           // 🔽 sort by your best fluency (descending)
           .sort((a, b) => b.yourBestRaw - a.yourBestRaw);
 
-        setRows(composed);
+        if (!cancelled) setRows(composed);
       } catch (e) {
         console.error('Leaderboard error:', e);
-        setLoadError(true);
-        setRows([]);
+        if (!cancelled) { setLoadError(true); setRows([]); }
       } finally {
-        setLoading(false);
+        if (!cancelled) { setLoading(false); setLoadedUserId(user.id); }
       }
     })();
-  }, [user?.id, router]);
+    return () => { cancelled = true; };
+  }, [user?.id, authLoading, router]);
 
-  const topSpots = rows.filter(row => row.yourBestRaw >= row.globalBestRaw).length;
+  const topSpots = rows.filter(row => row.globalBestRaw !== null && row.yourBestRaw >= row.globalBestRaw).length;
   const longestStreak = rows.length ? Math.max(...rows.map(row => row.yourBestStreak)) : 0;
   const activeStreak = rows.length ? Math.max(...rows.map(row => row.yourCurrentStreak)) : 0;
+
+  if (authLoading || !user || (loadedUserId !== null && loadedUserId !== user.id)) return <div className="bl-page bl-loading min-h-screen" role="status">
+    <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
+    <p className="bl-kicker">Checking your account</p>
+  </div>;
 
   return (
     <div className="bl-page bl-leaderboard-page">
@@ -257,7 +267,7 @@ export default function LeaderboardPage() {
                   </thead>
                   <tbody>
                     {rows.map((row, index) => {
-                      const youLeadFluency = row.yourBestRaw >= row.globalBestRaw;
+                      const youLeadFluency = row.globalBestRaw !== null && row.yourBestRaw >= row.globalBestRaw;
                       return (
                         <tr key={row.quiz_id} className={youLeadFluency ? 'is-leading' : ''}>
                           <td>
@@ -266,7 +276,7 @@ export default function LeaderboardPage() {
                           </td>
                           <td><b>{row.yourBestRaw.toFixed(1)}</b></td>
                           <td>
-                            <b>{row.globalBestRaw.toFixed(1)}</b>
+                            <b>{row.globalBestRaw?.toFixed(1) ?? '—'}</b>
                             {youLeadFluency && <span className="bl-crown-badge"><i>♛</i> Top score</span>}
                           </td>
                           <td>{row.yourBestStreak} <small>days</small></td>
@@ -280,7 +290,7 @@ export default function LeaderboardPage() {
 
               <div className="bl-leaderboard-cards">
                 {rows.map((row, index) => {
-                  const youLeadFluency = row.yourBestRaw >= row.globalBestRaw;
+                  const youLeadFluency = row.globalBestRaw !== null && row.yourBestRaw >= row.globalBestRaw;
                   return (
                     <article key={row.quiz_id} className={youLeadFluency ? 'is-leading' : ''}>
                       <header>
@@ -290,7 +300,7 @@ export default function LeaderboardPage() {
                       </header>
                       <div className="bl-mobile-scoreline">
                         <div><span>Your best</span><strong>{row.yourBestRaw.toFixed(1)}</strong></div>
-                        <div><span>Board best</span><strong>{row.globalBestRaw.toFixed(1)}</strong></div>
+                        <div><span>Board best</span><strong>{row.globalBestRaw?.toFixed(1) ?? '—'}</strong></div>
                       </div>
                       <footer>
                         <span>Best streak <b>{row.yourBestStreak}d</b></span>
@@ -303,7 +313,7 @@ export default function LeaderboardPage() {
 
               <div className="bl-board-note">
                 <span aria-hidden="true">i</span>
-                <p>Streaks use Europe/London calendar days; multiple attempts in one day count once. Top scorers are entered into the monthly prize draw. Good times make good times.</p>
+                <p>Streaks use Europe/London calendar days; multiple attempts in one day count once. Board bests compare recorded rates, not mastery decisions. Other learners’ names are not displayed.</p>
               </div>
             </>
           )}

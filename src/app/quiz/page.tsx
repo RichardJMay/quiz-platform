@@ -2,28 +2,31 @@
 
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useState } from 'react'
-import QuizTaker from '@/components/QuizTaker'
 import QuizTakerBanked from '@/components/QuizTakerBanked'
 import QuizTakerBankedTyped from '@/components/QuizTakerBankedTyped'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
+import AuthModal from '@/components/auth/AuthModal'
+import Link from 'next/link'
 
-type QuizMode = 'mcq' | 'banked'
 type ResponseMode = 'options' | 'typed' | null
 
 function QuizLoader() {
   const searchParams = useSearchParams()
   const quizId = searchParams.get('id')
 
-  const [mode, setMode] = useState<QuizMode | null>(null)
   const [responseMode, setResponseMode] = useState<ResponseMode>(null)
+  const [loadedQuizId, setLoadedQuizId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     const fetchMode = async () => {
+      setLoading(true)
+      setResponseMode(null)
       if (!quizId) {
-        setMode(null)
-        setResponseMode(null)
         setLoading(false)
+        setLoadedQuizId(null)
         return
       }
       try {
@@ -31,30 +34,33 @@ function QuizLoader() {
           .from('quizzes')
           .select('quiz_mode, response_mode')
           .eq('id', quizId)
+          .eq('is_listed', true)
           .single()
 
-        if (error || !data) {
-          console.error('Failed to load quiz mode', error)
-          setMode('mcq') // safe fallback
-          setResponseMode('options')
+        if (cancelled) return
+        if (error || !data || data.quiz_mode !== 'banked') {
+          setResponseMode(null)
         } else {
-          setMode((data.quiz_mode as QuizMode) || 'mcq')
-          // default banked response mode to 'options' if null
           setResponseMode((data.response_mode as ResponseMode) ?? 'options')
         }
       } catch (err) {
-        console.error(err)
-        setMode('mcq')
-        setResponseMode('options')
+        if (!cancelled) {
+          console.error(err)
+          setResponseMode(null)
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoadedQuizId(quizId)
+          setLoading(false)
+        }
       }
     }
 
-    fetchMode()
+    void fetchMode()
+    return () => { cancelled = true }
   }, [quizId])
 
-  if (loading) {
+  if (loading || loadedQuizId !== quizId) {
     return (
       <div className="bl-page bl-loading min-h-screen">
         <div className="bl-loader" aria-hidden="true">
@@ -65,19 +71,55 @@ function QuizLoader() {
     )
   }
 
-  if (!mode) {
-    // No id → fall back to the MCQ component's selection screen
-    return <QuizTaker />
+  if (!responseMode) {
+    return <div className="bl-page bl-quiz-signin"><main className="bl-container">
+      <p className="bl-kicker">BehaviorLingo practice</p>
+      <h1>Practice set unavailable.</h1>
+      <p>Choose a listed fluency pack from the modules.</p>
+      <Link className="bl-back-link" href="/">Back to modules</Link>
+    </main></div>
   }
 
-  if (mode === 'banked') {
-    return responseMode === 'typed' ? <QuizTakerBankedTyped /> : <QuizTakerBanked />
-  }
-
-  return <QuizTaker />
+  return responseMode === 'typed' ? <QuizTakerBankedTyped /> : <QuizTakerBanked />
 }
 
 export default function QuizPage() {
+  const { user, loading: authLoading } = useAuth()
+  const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login')
+
+  if (authLoading) {
+    return (
+      <div className="bl-page bl-loading" role="status" aria-live="polite">
+        <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
+        <p className="bl-kicker">Checking your account</p>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="bl-page bl-quiz-signin">
+        <main className="bl-container">
+          <p className="bl-kicker">BehaviorLingo practice</p>
+          <h1>Sign in to practise.</h1>
+          <p>Your account keeps your attempts and progress together.</p>
+          <div className="bl-hero-actions">
+            <button className="bl-button bl-button-primary" onClick={() => { setAuthMode('login'); setAuthModalOpen(true) }}>Log in</button>
+            <button className="bl-button" onClick={() => { setAuthMode('register'); setAuthModalOpen(true) }}>Create account</button>
+          </div>
+          <Link className="bl-back-link" href="/">Back to modules</Link>
+        </main>
+        <AuthModal
+          isOpen={authModalOpen}
+          onClose={() => setAuthModalOpen(false)}
+          mode={authMode}
+          onSwitchMode={setAuthMode}
+        />
+      </div>
+    )
+  }
+
   return (
     <Suspense
       fallback={
