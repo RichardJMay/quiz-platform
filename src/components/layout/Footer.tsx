@@ -10,6 +10,7 @@ export default function Footer() {
         </div>
         <nav className="bl-footer-links" aria-label="Footer navigation">
           <Link href="/">Home</Link>
+          <Link href="/how-it-works">How it works</Link>
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>
         </nav>

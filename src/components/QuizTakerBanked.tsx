@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { getPackGuide } from '@/lib/quiz-pathway'
+import { chooseDefinitionQuestions } from '@/lib/definition-variants'
 import { loadPathwayAttempts, nextAttemptContext, type AttemptContext } from '@/lib/pathway-client'
 import { accuracyGate, type PathwayAttempt } from '@/lib/learning-stage'
 
@@ -25,6 +26,8 @@ interface BankedQuestion {
   explanation: string
   hint?: string | null
   correct_term_id: string
+  definition_variant?: number
+  rephrased_definition?: string | null
 }
 
 type TimingResult = { minutes: number; rate: number; percentage: number; saved: boolean; complete: boolean }
@@ -42,7 +45,7 @@ function shuffle<T>(arr: T[]): T[] {
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const IDLE_WARNING_MS = 4.5 * 60 * 1000
 
-export default function QuizTakerBanked() {
+export default function QuizTakerBanked({ contextPractice = false }: { contextPractice?: boolean }) {
   const searchParams = useSearchParams()
   const router = useRouter()
   const quizId = searchParams.get('id')
@@ -75,6 +78,9 @@ export default function QuizTakerBanked() {
   const [accuracyUnlocked, setAccuracyUnlocked] = useState(false)
   const [pathwayError, setPathwayError] = useState(false)
   const [studentName, setStudentName] = useState('')
+  const [contextUnlocked, setContextUnlocked] = useState(false)
+  const [contextLocked, setContextLocked] = useState(false)
+  const contextAttemptId = useRef<string | null>(null)
 
   const [score, setScore] = useState(0)
   const [quizCompleted, setQuizCompleted] = useState(false)
@@ -97,7 +103,7 @@ export default function QuizTakerBanked() {
       loadQuizzes()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quizId])
+  }, [quizId, contextPractice])
 
   const loadQuizzes = async () => {
     const { data, error } = await supabase
@@ -115,6 +121,7 @@ export default function QuizTakerBanked() {
   }
 
   const loadSpecificQuiz = async (id: string) => {
+    setContextLocked(false)
     setLoading(true)
     setPathwayError(false)
     try {
@@ -137,8 +144,16 @@ export default function QuizTakerBanked() {
         description: quiz.description,
       })
       if (!user) throw new Error('Sign in is required to load your learning pathway')
+      const { data: contextAccess, error: contextError } = await supabase.rpc('context_practice_access', { p_quiz_id: id })
+      if (contextError) throw contextError
+      setContextUnlocked(contextAccess === true)
+      if (contextPractice && !contextAccess) {
+        setContextLocked(true)
+        setSelectedQuiz(null)
+        return
+      }
       const history = await loadPathwayAttempts(user.id, id)
-      setReadyStage(history.recognisedEarlierTimings || accuracyGate(history.attempts).met ? 'fluency' : 'accuracy')
+      setReadyStage(history.adaptiveFluencyUnlocked || history.recognisedEarlierTimings || accuracyGate(history.attempts).met ? 'fluency' : 'accuracy')
       setRecognisedEarlierTimings(history.recognisedEarlierTimings)
     } catch (err) {
       console.error('Error loading quiz:', err)
@@ -163,19 +178,20 @@ export default function QuizTakerBanked() {
     try {
       const previousAttempts = await loadPathwayAttempts(user.id, quiz.id)
       const context = nextAttemptContext(previousAttempts, user.id, quiz.id)
+      if (contextPractice) { context.stage = 'fluency'; context.purpose = 'fluency_practice' }
       setReadyStage(context.stage)
       setRecognisedEarlierTimings(context.recognisedEarlierTimings)
       setPriorPathwayAttempts(previousAttempts.attempts)
       setAccuracyUnlocked(false)
       const [{ data: termData, error: termError }, { data: qData, error: qError }] = await Promise.all([
         supabase
-          .from('quiz_term_bank')
+          .from('active_quiz_terms')
           .select('id, term_text')
           .eq('quiz_id', quiz.id)
           .order('created_at', { ascending: true }),
         supabase
-          .from('questions')
-          .select('id, question_text, explanation, hint, correct_term_id')
+          .from('active_definition_questions')
+          .select('id, question_text, explanation, hint, correct_term_id, definition_variant, rephrased_definition')
           .eq('quiz_id', quiz.id)
           .order('created_at', { ascending: true }),
       ])
@@ -184,13 +200,25 @@ export default function QuizTakerBanked() {
       if (qError) throw qError
       if (!qData?.length || !termData?.length) throw new Error('This pack has no terms or questions')
 
-      // ✅ Randomize QUESTION order (only)
-      const randomizedQs = shuffle(qData || [])
+      let activeTerms = (termData || []) as Term[]
+      let activeQuestions = (qData || []) as BankedQuestion[]
+      if (contextPractice) {
+        const { data: items, error: itemsError } = await supabase.rpc('context_practice_items', { p_quiz_id: quiz.id })
+        if (itemsError) throw itemsError
+        activeTerms = items.terms as Term[]
+        activeQuestions = items.questions as BankedQuestion[]
+        contextAttemptId.current = window.crypto.randomUUID()
+      } else if (context.stage === 'accuracy') {
+        activeQuestions = chooseDefinitionQuestions(activeQuestions)
+      } else {
+        activeQuestions = activeQuestions.filter(question => question.definition_variant === 0)
+      }
+      const randomizedQs = shuffle(activeQuestions)
 
-      setTerms(termData || [])
+      setTerms(activeTerms)
       setSelectedQuiz(quiz)
       setAttemptContext(context)
-      setRemainingTerms(termData || []) // keep natural order for options
+      setRemainingTerms(activeTerms) // fixed order; correct terms leave the bank
       setQuestions(randomizedQs as BankedQuestion[])
       setCurrentQuestionIndex(0)
       setSelectedTermId('')
@@ -312,15 +340,14 @@ export default function QuizTakerBanked() {
     }
 
     try {
-      const { error } = await supabase
-        .from('student_responses')
-        .insert([{
-          user_id: user.id,
-          student_name: studentName,
-          question_id: currentQuestion.id,
-          selected_term_id: selectedTermId,
-          is_correct: isCorrect,
-          hint_used: hintUsedForItem,
+      const { error } = contextPractice
+        ? await supabase.rpc('save_context_response', {
+          p_attempt_id: contextAttemptId.current, p_quiz_id: selectedQuiz?.id,
+          p_question_id: currentQuestion.id, p_selected_term_id: selectedTermId,
+        })
+        : await supabase.from('student_responses').insert([{
+          user_id: user.id, student_name: studentName, question_id: currentQuestion.id,
+          selected_term_id: selectedTermId, is_correct: isCorrect, hint_used: hintUsedForItem,
         }])
       if (error) throw error
     } catch (error) {
@@ -369,6 +396,10 @@ export default function QuizTakerBanked() {
         learnerLocalDate: attemptContext.learnerLocalDate,
       }]).met)
     }
+    if (saved && !contextPractice && selectedQuiz) {
+      const { data } = await supabase.rpc('context_practice_access', { p_quiz_id: selectedQuiz.id })
+      setContextUnlocked(data === true)
+    }
     setResult({ minutes: totalTimeMinutes, rate: fluencyRate, percentage: accuracyPercentage, saved, complete })
     setSaving(false)
     setQuizCompleted(true)
@@ -376,6 +407,15 @@ export default function QuizTakerBanked() {
 
   const saveQuizAttempt = async (totalTimeMinutes: number, accuracyPercentage: number, fluencyRate: number): Promise<boolean> => {
     if (!selectedQuiz || !attemptContext || !user) return false
+    if (contextPractice) {
+      if (!contextAttemptId.current) return false
+      const { error } = await supabase.rpc('save_context_practice', {
+        p_attempt_id: contextAttemptId.current, p_quiz_id: selectedQuiz.id,
+        p_total: questions.length, p_correct: score, p_minutes: totalTimeMinutes,
+      })
+      if (error) { console.error('Could not save context timing:', error); return false }
+      return true
+    }
     const supported = assistanceUsed || optionsReduced
     const attemptData = {
       user_email: user?.email || 'anonymous',
@@ -455,6 +495,14 @@ export default function QuizTakerBanked() {
     )
   }
 
+  if (contextPractice && contextLocked) {
+    return <div className="bl-page bl-quiz-signin"><main className="bl-container">
+      <p className="bl-kicker">Practice questions</p><h1>Build fluency first.</h1>
+      <p>Complete the accuracy pathway, then reach 100% accuracy and 15 correct responses per minute in the first options timing of a day to unlock this pack’s questions.</p>
+      <button className="bl-button" onClick={() => router.push(`/quiz?id=${quizId}`)}>Return to options practice →</button>
+    </main></div>
+  }
+
   if (quizCompleted && result) {
     const percentage = result.percentage
     const totalQuizTimeMinutes = result.minutes
@@ -470,7 +518,7 @@ export default function QuizTakerBanked() {
             <button className="bl-session-wordmark" onClick={() => router.push('/')} aria-label="BehaviorLingo home">
               behavior<span>lingo</span>
             </button>
-            <span className="bl-session-mode">{attemptContext?.stage === 'accuracy' ? 'Accuracy practice' : 'Options sprint'}</span>
+            <span className="bl-session-mode">{contextPractice ? 'Practice questions' : attemptContext?.stage === 'accuracy' ? 'Accuracy practice' : 'Options sprint'}</span>
           </div>
         </header>
         <main className="bl-session-shell bl-complete-wrap">
@@ -478,7 +526,7 @@ export default function QuizTakerBanked() {
             <p className="bl-kicker">{result.complete ? 'Session complete' : 'Session ended'}</p>
             <h1>{result.saved ? attemptContext?.stage === 'accuracy' ? 'Accuracy attempt logged.' : 'Timing logged.' : result.complete ? 'Save not confirmed.' : 'Attempt incomplete.'}</h1>
             <p className="bl-complete-lede" role="status">{result.saved
-              ? 'Your latest run has been added to your performance record.'
+              ? 'Your latest run has been saved.'
               : result.complete
                 ? 'We could not confirm that this timing was saved. Please check your progress before starting another.'
                 : 'This attempt ended after inactivity and was not added to your performance record.'}</p>
@@ -499,15 +547,15 @@ export default function QuizTakerBanked() {
               <div className="bl-result-cell">
                 <span>Accuracy</span><strong>{percentage}%</strong><small>{score}/{questions.length} correct</small>
               </div>
-              {attemptContext?.stage === 'fluency' && <div className={`bl-result-cell ${isAbove ? 'bl-result-on-aim' : 'bl-result-building'}`}>
-                <span>Fluency</span><strong>{correctResponsesPerMinute.toFixed(1)}</strong><small>correct/min · aim {threshold}</small>
+              {attemptContext?.stage === 'fluency' && <div className={`bl-result-cell ${!contextPractice && isAbove ? 'bl-result-on-aim' : 'bl-result-building'}`}>
+                <span>{contextPractice ? 'Response rate' : 'Fluency'}</span><strong>{correctResponsesPerMinute.toFixed(1)}</strong><small>{contextPractice ? 'correct/min' : `correct/min · aim ${threshold}`}</small>
               </div>}
               <div className="bl-result-cell">
                 <span>Duration</span><strong>{totalQuizTimeMinutes.toFixed(1)}</strong><small>minutes</small>
               </div>
             </div>}
 
-            {result.complete && attemptContext?.stage === 'fluency' && <div className="bl-analysis-panel">
+            {result.complete && !contextPractice && attemptContext?.stage === 'fluency' && <div className="bl-analysis-panel">
               <div className="bl-analysis-heading">
                 <div><span>Fluency aim</span><strong>{isAbove ? 'Aim reached' : 'Building toward aim'}</strong></div>
                 <b>{correctResponsesPerMinute.toFixed(1)} / {threshold}</b>
@@ -521,7 +569,8 @@ export default function QuizTakerBanked() {
 
             <div className="bl-session-actions">
               <button onClick={() => router.push('/')} className="bl-button bl-button-secondary">Return home</button>
-              {user && <button onClick={() => router.push('/progress')} className="bl-button">View progress</button>}
+              {user && <button onClick={() => router.push(`/progress?id=${selectedQuiz?.id}`)} className="bl-button">View progress</button>}
+              {!contextPractice && contextUnlocked && <button className="bl-button" onClick={() => router.push(`/quiz?id=${selectedQuiz?.id}&stage=context`)}>Practice questions →</button>}
             </div>
           </section>
         </main>
@@ -538,25 +587,25 @@ export default function QuizTakerBanked() {
         <header className="bl-session-topbar">
           <div className="bl-session-shell bl-session-topbar-inner">
             <button className="bl-session-wordmark" onClick={() => router.push('/')} aria-label="BehaviorLingo home">behavior<span>lingo</span></button>
-            <span className="bl-session-mode">Options sprint</span>
+            <span className="bl-session-mode">{contextPractice ? 'Practice questions' : 'Options sprint'}</span>
           </div>
         </header>
         <main className="bl-session-shell bl-start-wrap">
           <section className="bl-start-panel">
             <div className="bl-start-copy">
-              <p className="bl-kicker">{readyStage === 'accuracy' ? 'Step 1 of 2 · Get the terms right' : 'Step 2 of 2 · Build speed'}</p>
+              <p className="bl-kicker">{contextPractice ? 'Step 4 · Use the terms in context' : readyStage === 'accuracy' ? 'Accuracy · Get the terms right' : 'Fluency · Build speed'}</p>
               <h1>{selectedQuiz.title}</h1>
               <p>{guide?.theme || selectedQuiz.description}</p>
               {guide && <p className="bl-tasklist-codes">Task-list areas: {guide.codes}</p>}
               {user && <div className="bl-ready-label">Ready, <strong>{displayName}</strong></div>}
-              {readyStage === 'fluency' && recognisedEarlierTimings && <p>Earlier perfect timings count toward your progress. You can start timed practice.</p>}
+              {!contextPractice && readyStage === 'fluency' && recognisedEarlierTimings && <p>Earlier perfect timings count toward your progress. You can start timed practice.</p>}
             </div>
             <div className="bl-start-console">
               <span>How this pack works</span>
               <ol>
-                <li><b>01</b><p>Match each definition to its term.</p></li>
+                <li><b>01</b><p>{contextPractice ? 'Read the scenario and select the term it illustrates.' : 'Match each definition to its term.'}</p></li>
                 <li><b>02</b><p>Correct terms leave the bank, making the task progressively easier.</p></li>
-                <li><b>03</b><p>{readyStage === 'accuracy'
+                <li><b>03</b><p>{contextPractice ? 'Practise accurately. Your accuracy and response rate are recorded separately from definition fluency.' : readyStage === 'accuracy'
                   ? 'Get every answer right without prompts in two separate sessions. Then timed practice unlocks.'
                   : `Work accurately and build toward ${threshold} correct responses per minute.`}</p></li>
               </ol>
@@ -576,7 +625,7 @@ export default function QuizTakerBanked() {
       <div className="bl-page bl-session-page" onMouseMove={startIdleTimers} onKeyDown={startIdleTimers}>
         <header className="bl-session-topbar">
           <div className="bl-session-shell bl-session-topbar-inner">
-            <div className="bl-session-title"><span>{attemptContext?.stage === 'accuracy' ? 'Accuracy practice' : 'Options sprint'}</span><strong>{selectedQuiz.title}</strong></div>
+            <div className="bl-session-title"><span>{contextPractice ? 'Practice questions' : attemptContext?.stage === 'accuracy' ? 'Accuracy practice' : 'Options sprint'}</span><strong>{selectedQuiz.title}</strong></div>
             <button onClick={() => router.push('/')} disabled={saving} className="bl-session-exit">Exit attempt</button>
           </div>
         </header>
@@ -593,18 +642,18 @@ export default function QuizTakerBanked() {
               <div className="bl-live-metrics">
                 <div><span>Item</span><strong>{String(currentQuestionIndex + 1).padStart(2, '0')} / {String(questions.length).padStart(2, '0')}</strong></div>
                 <div><span>Correct</span><strong>{score}</strong></div>
-                {attemptContext?.stage === 'fluency' && <div className={isAboveThreshold ? 'is-on-aim' : ''}><span>Rate</span><strong>{currentRate.toFixed(1)} <small>/min</small></strong></div>}
+                {attemptContext?.stage === 'fluency' && <div className={!contextPractice && isAboveThreshold ? 'is-on-aim' : ''}><span>Rate</span><strong>{currentRate.toFixed(1)} <small>/min</small></strong></div>}
                 <div><span>Terms left</span><strong>{options.length}</strong></div>
               </div>
               <div className="bl-live-bars">
                 <div><span>Pack progress</span><div className="bl-progress-track"><i style={{ width: `${progress}%` }} /></div></div>
-                {attemptContext?.stage === 'fluency' && <div><span>Fluency · aim {threshold}/min</span><div className="bl-progress-track bl-rate-progress"><i className={isAboveThreshold ? 'is-on-aim' : ''} style={{ width: `${barPercentage}%` }} /></div></div>}
+                {!contextPractice && attemptContext?.stage === 'fluency' && <div><span>{`Fluency · aim ${threshold}/min`}</span><div className="bl-progress-track bl-rate-progress"><i className={!contextPractice && isAboveThreshold ? 'is-on-aim' : ''} style={{ width: `${barPercentage}%` }} /></div></div>}
               </div>
             </section>
 
             <section className="bl-question-panel">
-              <div className="bl-question-label"><span>Definition</span><b>{String(currentQuestionIndex + 1).padStart(2, '0')}</b></div>
-              <h1>{currentQuestion.question_text}</h1>
+              <div className="bl-question-label"><span>{contextPractice ? 'Scenario' : 'Definition'}</span><b>{String(currentQuestionIndex + 1).padStart(2, '0')}</b></div>
+              <h1 className={contextPractice ? 'bl-context-question' : undefined}>{currentQuestion.question_text}</h1>
 
               <div className="bl-option-bank" aria-label="Term options">
                 {options.map((term) => {
@@ -680,7 +729,7 @@ export default function QuizTakerBanked() {
     <div className="bl-page bl-session-page">
       <main className="bl-session-shell bl-start-wrap">
       <section className="bl-start-panel bl-selection-panel">
-      <div className="bl-start-copy"><p className="bl-kicker">Options practice</p><h1>{pathwayError ? 'Could not load your learning pathway' : 'Select a fluency pack'}</h1>
+      <div className="bl-start-copy"><p className="bl-kicker">Options practice</p><h1>{pathwayError ? contextPractice ? 'Could not load practice questions' : 'Could not load your learning pathway' : 'Select a fluency pack'}</h1>
         {pathwayError && <p role="alert">Please try again. No attempt has been started.</p>}
         {pathwayError && quizId && <button className="bl-button" onClick={() => loadSpecificQuiz(quizId)}>Try again</button>}
       </div>

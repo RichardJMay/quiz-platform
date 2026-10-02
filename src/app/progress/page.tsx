@@ -9,6 +9,10 @@ import stateSpaceBundleJson from './behaviorlingo_state_space_posterior_bundle_v
 import { AccuracyByAttempt, CumulativeRecord } from './PathwayCharts'
 import { completedAttempts, cumulativeRecord, dayKey, fluencyPoints, type ProgressAttempt } from './progress-records'
 import { recognisesEarlierTimings } from '@/lib/learning-stage'
+import { adaptiveAccuracyAttempts, cumulativeWithAdaptive, type AdaptiveSessionRecord, type AdaptiveTrialRecord, type AdaptiveUnlock } from './adaptive-progress'
+import ContextPracticeRecord from '@/components/ContextPracticeRecord'
+import { AdaptiveTermProgress, type TermRow, type TermState } from './AdaptiveTermProgress'
+import { unlockedOptionsPacks } from '@/lib/options-unlock'
 import {
   forecastNextAttempt,
   filterObservedFluency,
@@ -18,6 +22,8 @@ import {
 } from './behaviorlingo-state-space-v3'
 
 type ResponseMode = 'options' | 'typed'
+type QuizMeta = { id: string; title: string; category_id: string; response_mode: ResponseMode | null }
+type PackLink = { typed_quiz_id: string; options_quiz_id: string }
 
 interface QuizAttempt extends ProgressAttempt {
   student_name: string
@@ -148,13 +154,13 @@ function FluencyTrajectory({ observed, filtered, aim }: {
   </svg></div>
 }
 
-function PackSelector({ quizzes, selectedQuiz, onSelect }: {
-  quizzes: [string, { title: string; mode: ResponseMode }][]
-  selectedQuiz: string
-  onSelect: (quizId: string) => void
+function AreaSelector({ areas, selectedArea, onSelect }: {
+  areas: [string, string][]
+  selectedArea: string
+  onSelect: (areaId: string) => void
 }) {
   const menuRef = useRef<HTMLDetailsElement>(null)
-  const selected = quizzes.find(([id]) => id === selectedQuiz)?.[1]
+  const selected = areas.find(([id]) => id === selectedArea)?.[1]
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) menuRef.current?.removeAttribute('open')
@@ -164,26 +170,26 @@ function PackSelector({ quizzes, selectedQuiz, onSelect }: {
   }, [])
 
   return <div className="bl-pack-selector">
-    <span>Fluency pack</span>
+    <span>Content area</span>
     <details ref={menuRef} onKeyDown={event => {
       if (event.key === 'Escape') {
         menuRef.current?.removeAttribute('open')
         menuRef.current?.querySelector('summary')?.focus()
       }
     }}>
-      <summary aria-label={`Fluency pack: ${selected?.title ?? 'Choose a pack'}`}>
-        <span>{selected?.title} · {selected?.mode === 'typed' ? 'Typed' : 'Options'}</span>
+      <summary aria-label={`Content area: ${selected ?? 'Choose an area'}`}>
+        <span>{selected}</span>
         <span aria-hidden="true">⌄</span>
       </summary>
-      <div className="bl-pack-selector-menu" role="group" aria-label="Choose a fluency pack">
-        {quizzes.map(([id, quiz]) => <button key={id} type="button"
-          aria-current={id === selectedQuiz ? 'true' : undefined}
+      <div className="bl-pack-selector-menu" role="group" aria-label="Choose a content area">
+        {areas.map(([id, name]) => <button key={id} type="button"
+          aria-current={id === selectedArea ? 'true' : undefined}
           onClick={() => {
             onSelect(id)
             menuRef.current?.removeAttribute('open')
             menuRef.current?.querySelector('summary')?.focus()
           }}>
-          {quiz.title} · {quiz.mode === 'typed' ? 'Typed' : 'Options'}
+          {name}
         </button>)}
       </div>
     </details>
@@ -192,6 +198,13 @@ function PackSelector({ quizzes, selectedQuiz, onSelect }: {
 
 export default function ProgressPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([])
+  const [adaptiveSessions, setAdaptiveSessions] = useState<AdaptiveSessionRecord[]>([])
+  const [adaptiveTrials, setAdaptiveTrials] = useState<AdaptiveTrialRecord[]>([])
+  const [unlocks, setUnlocks] = useState<AdaptiveUnlock[]>([])
+  const [allQuizMeta, setAllQuizMeta] = useState<QuizMeta[]>([])
+  const [areaNames, setAreaNames] = useState<Record<string, string>>({})
+  const [typedLinks, setTypedLinks] = useState<PackLink[]>([])
+  const [termRecord, setTermRecord] = useState<{ quizId: string; terms: TermRow[]; states: TermState[] } | null>(null)
   const [selectedQuiz, setSelectedQuiz] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
@@ -203,6 +216,13 @@ export default function ProgressPage() {
   useEffect(() => {
     if (authLoading) return
     setAttempts([])
+    setAdaptiveSessions([])
+    setAdaptiveTrials([])
+    setUnlocks([])
+    setAllQuizMeta([])
+    setAreaNames({})
+    setTypedLinks([])
+    setTermRecord(null)
     setSelectedQuiz('')
     setLoadError(false)
     if (!user) { router.replace('/'); return }
@@ -211,9 +231,10 @@ export default function ProgressPage() {
     setLoading(true)
     const loadAttempts = async () => {
       try {
-        const records: any[] = []
-        for (let offset = 0; ; offset += 500) {
-          const { data, error } = await supabase.from('quiz_attempts').select(`
+        const loadLegacy = async () => {
+          const records: any[] = []
+          for (let offset = 0; ; offset += 500) {
+            const { data, error } = await supabase.from('quiz_attempts').select(`
             id, quiz_id, student_name, total_questions, correct_answers,
             accuracy_percentage, fluency_rate, total_time_minutes, completed_at, completed_day_ldn,
             attempt_purpose, session_id, independent, assistance_used, terminal_option_condition,
@@ -221,17 +242,62 @@ export default function ProgressPage() {
             quizzes!inner(title, description, response_mode)
           `).eq('user_id', user.id).order('completed_at', { ascending: false })
             .order('id', { ascending: false }).range(offset, offset + 499)
-          if (error) throw error
-          records.push(...(data || []))
-          if (!data || data.length < 500) break
+            if (error) throw error
+            records.push(...(data || []))
+            if (!data || data.length < 500) break
+          }
+          return records
         }
+        const loadPages = async (table: 'adaptive_sessions' | 'adaptive_trials',
+          columns: string, orderColumn: string) => {
+          const records: any[] = []
+          for (let offset = 0; ; offset += 500) {
+            const { data, error } = await supabase.from(table).select(columns)
+              .eq('user_id', user.id).order(orderColumn, { ascending: false })
+              .range(offset, offset + 499)
+            if (error) throw error
+            records.push(...(data || []))
+            if (!data || data.length < 500) break
+          }
+          return records
+        }
+        const [records, sessions, trials, unlockResult, quizResult, areaResult, linkResult] = await Promise.all([
+          loadLegacy(),
+          loadPages('adaptive_sessions',
+            'id, quiz_id, kind, status, completed_at, quizzes!inner(title, description, response_mode)',
+            'started_at'),
+          loadPages('adaptive_trials',
+            'session_id, term_id, trial_type, support_level, is_standard_format, is_correct, answered_at',
+            'answered_at'),
+          supabase.from('adaptive_pack_progress').select('quiz_id, fluency_unlocked_at').eq('user_id', user.id),
+          supabase.from('quizzes').select('id, title, category_id, response_mode')
+            .eq('quiz_mode', 'banked').eq('is_listed', true).limit(1000),
+          supabase.from('quiz_categories').select('id, name').limit(500),
+          supabase.from('adaptive_pack_links').select('typed_quiz_id, options_quiz_id').limit(1000),
+        ])
+        if (unlockResult.error) throw unlockResult.error
+        if (quizResult.error) throw quizResult.error
+        if (areaResult.error) throw areaResult.error
+        if (linkResult.error) throw linkResult.error
         const typedData = records.map((item: any) => ({
           ...item,
           quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes,
         })) as QuizAttempt[]
+        const sessionData = sessions.map((item: any) => ({
+          ...item, quizzes: Array.isArray(item.quizzes) ? item.quizzes[0] : item.quizzes,
+        })) as AdaptiveSessionRecord[]
         if (cancelled) return
         setAttempts(typedData)
-        setSelectedQuiz(typedData[0]?.quiz_id || '')
+        setAdaptiveSessions(sessionData)
+        setAdaptiveTrials(trials as AdaptiveTrialRecord[])
+        setUnlocks((unlockResult.data || []) as AdaptiveUnlock[])
+        setAllQuizMeta((quizResult.data || []) as QuizMeta[])
+        setAreaNames(Object.fromEntries((areaResult.data || []).map(row => [row.id, row.name])))
+        setTypedLinks((linkResult.data || []) as PackLink[])
+        const requested = new URLSearchParams(window.location.search).get('id')
+        const first = requested && (quizResult.data || []).some(row => row.id === requested)
+          ? requested : typedData[0]?.quiz_id || sessionData[0]?.quiz_id || ''
+        setSelectedQuiz((linkResult.data || []).find(row => row.typed_quiz_id === first)?.options_quiz_id || first)
       } catch (error) {
         console.error('Error loading progress:', error)
         if (!cancelled) setLoadError(true)
@@ -243,27 +309,75 @@ export default function ProgressPage() {
     return () => { cancelled = true }
   }, [router, user?.id, authLoading, reloadKey])
 
-  const quizzes = useMemo(() => {
-    const map = new Map<string, { title: string; mode: ResponseMode }>()
-    attempts.forEach(attempt => {
-      if (attempt.quizzes && !map.has(attempt.quiz_id)) {
-        map.set(attempt.quiz_id, {
-          title: attempt.quizzes.title,
-          mode: attempt.quizzes.response_mode === 'typed' ? 'typed' : 'options',
+  useEffect(() => {
+    setTermRecord(null)
+    if (!user || !selectedQuiz || !adaptiveSessions.some(row => row.quiz_id === selectedQuiz)) return
+    let cancelled = false
+    const loadTerms = async () => {
+      try {
+        const [termsResult, statesResult] = await Promise.all([
+          supabase.from('active_quiz_terms').select('id, term_text').eq('quiz_id', selectedQuiz)
+            .order('term_text').limit(500),
+          supabase.from('adaptive_term_state').select('term_id, certified_at')
+            .eq('user_id', user.id).eq('quiz_id', selectedQuiz).limit(500),
+        ])
+        if (termsResult.error) throw termsResult.error
+        if (statesResult.error) throw statesResult.error
+        if (!cancelled) setTermRecord({
+          quizId: selectedQuiz,
+          terms: (termsResult.data || []) as TermRow[],
+          states: (statesResult.data || []) as TermState[],
         })
+      } catch (error) {
+        console.error('Error loading term readiness:', error)
+        if (!cancelled) setLoadError(true)
       }
-    })
-    return Array.from(map.entries())
-  }, [attempts])
+    }
+    void loadTerms()
+    return () => { cancelled = true }
+  }, [user?.id, selectedQuiz, adaptiveSessions])
+
+  const quizzes = useMemo(() => {
+    const linkByTyped = new Map(typedLinks.map(link => [link.typed_quiz_id, link.options_quiz_id]))
+    const metaById = new Map(allQuizMeta.map(meta => [meta.id, meta]))
+    const active = new Set([...attempts.map(row => row.quiz_id), ...adaptiveSessions.map(row => row.quiz_id)])
+    const ids = new Set([...active].map(id => linkByTyped.get(id) || id))
+    return [...ids].map(id => metaById.get(id)).filter((meta): meta is QuizMeta => Boolean(meta))
+      .sort((a, b) => (areaNames[a.category_id] || '').localeCompare(areaNames[b.category_id] || '') || a.title.localeCompare(b.title))
+  }, [attempts, adaptiveSessions, typedLinks, allQuizMeta, areaNames])
+  const areas = useMemo(() => [...new Set(quizzes.map(row => row.category_id))]
+    .map(id => [id, areaNames[id] || 'Other content'] as [string, string]), [quizzes, areaNames])
+  const selectedArea = quizzes.find(quiz => quiz.id === selectedQuiz)?.category_id || areas[0]?.[0] || ''
   const selectedAttempts = useMemo(
     () => attempts.filter(attempt => attempt.quiz_id === selectedQuiz),
     [attempts, selectedQuiz],
   )
-  const selectedMeta = quizzes.find(([id]) => id === selectedQuiz)?.[1]
-  const selectedMode: ResponseMode = selectedMeta?.mode ?? 'options'
+  const selectedMeta = quizzes.find(quiz => quiz.id === selectedQuiz)
+  const selectedTypedQuizId = typedLinks.find(link => link.options_quiz_id === selectedQuiz)?.typed_quiz_id
+  const typedAttempts = useMemo(() => attempts.filter(row => row.quiz_id === selectedTypedQuizId),
+    [attempts, selectedTypedQuizId])
+  const selectedSessions = useMemo(() => adaptiveSessions.filter(row => row.quiz_id === selectedQuiz),
+    [adaptiveSessions, selectedQuiz])
+  const selectedTrials = useMemo(() => {
+    const ids = new Set(selectedSessions.map(row => row.id))
+    return adaptiveTrials.filter(row => ids.has(row.session_id))
+  }, [adaptiveTrials, selectedSessions])
+  const selectedUnlock = useMemo(() => unlockedOptionsPacks(attempts,
+    new Set(unlocks.map(row => row.quiz_id))).has(selectedQuiz), [attempts, unlocks, selectedQuiz])
+  const selectedMode: ResponseMode = selectedMeta?.response_mode ?? 'options'
   const fluencyAim = FLUENCY_AIMS[selectedMode]
-  const accuracyAttempts = useMemo(() => completedAttempts(selectedAttempts), [selectedAttempts])
-  const cumulative = useMemo(() => cumulativeRecord(attempts), [attempts])
+  const accuracyAttempts = useMemo(() => completedAttempts([
+    ...selectedAttempts, ...adaptiveAccuracyAttempts(selectedSessions, selectedTrials),
+  ]), [selectedAttempts, selectedSessions, selectedTrials])
+  const cumulative = useMemo(() => {
+    const old = cumulativeRecord(attempts)
+    const mastered = new Set<string>()
+    for (const id of new Set(attempts.map(row => row.quiz_id))) {
+      const record = cumulativeRecord(attempts.filter(row => row.quiz_id === id))
+      if (record.at(-1)?.accuracyMastered) mastered.add(id)
+    }
+    return cumulativeWithAdaptive(old, adaptiveSessions, unlocks, mastered)
+  }, [attempts, adaptiveSessions, unlocks])
   const fluencySource = useMemo(() => recognisesEarlierTimings(selectedAttempts)
     ? selectedAttempts : selectedAttempts.filter(attempt => attempt.attempt_purpose !== null), [selectedAttempts])
   const chronological = useMemo(() => eligibleAttempts(fluencySource), [fluencySource])
@@ -284,6 +398,16 @@ export default function ProgressPage() {
     mode: selectedMode, history, nextGapDays: elapsedDaysSinceLatest, plannedItems,
   }), [selectedMode, history, elapsedDaysSinceLatest, plannedItems])
   const bestRate = observed.length ? Math.max(...observed.map(point => point.rate)) : 0
+  const typedSource = useMemo(() => recognisesEarlierTimings(typedAttempts)
+    ? typedAttempts : typedAttempts.filter(attempt => attempt.attempt_purpose !== null), [typedAttempts])
+  const typedObserved = useMemo(() => toObservedPoints(typedSource), [typedSource])
+  const typedHistory = useMemo(() => toStateSpaceHistory(typedSource), [typedSource])
+  const typedFiltered = useMemo(() => {
+    const probes = eligibleAttempts(typedSource)
+    const firstDay = probes[0] ? new Date(`${dayKey(probes[0])}T12:00:00Z`).getTime() : 0
+    const elapsed = probes.map(probe => (new Date(`${dayKey(probe)}T12:00:00Z`).getTime() - firstDay) / 86_400_000)
+    return filterObservedFluency(STATE_SPACE_BUNDLE, 'typed', typedHistory, elapsed)
+  }, [typedSource, typedHistory])
 
   if (loading || authLoading || !user) return <div className="bl-page bl-loading min-h-screen">
     <div className="bl-loader" aria-hidden="true"><span /><span /><span /><span /></div>
@@ -320,13 +444,14 @@ export default function ProgressPage() {
           <h1>Your practice, accuracy and speed.</h1>
           <div className="bl-progress-rules">
             <p><strong>Accuracy record</strong><span>Every completed attempt, including timed practice.</span></p>
-            <p><strong>Fluency aim</strong><span>One daily timing at 100% and {fluencyAim} correct/min.</span></p>
+            <p><strong>Fluency aims</strong><span>One daily timing at 100%: options 15/min, typed 6/min.</span></p>
           </div>
         </div>
-        {attempts.length > 0 && <PackSelector quizzes={quizzes} selectedQuiz={selectedQuiz} onSelect={setSelectedQuiz} />}
+        {areas.length > 0 && <AreaSelector areas={areas} selectedArea={selectedArea}
+          onSelect={areaId => setSelectedQuiz(quizzes.find(quiz => quiz.category_id === areaId)!.id)} />}
       </section>
 
-      {attempts.length === 0 ? <section className="bl-progress-empty">
+      {quizzes.length === 0 ? <section className="bl-progress-empty">
         <span>NO_ATTEMPTS_RECORDED</span>
         <h2>Your performance record starts with a pack attempt.</h2>
         <p>First, work toward getting every answer right. After two perfect sessions without prompts, you can start timed practice.</p>
@@ -334,17 +459,28 @@ export default function ProgressPage() {
           Choose a pack <span>→</span>
         </button>
       </section> : <>
+        <nav className="bl-progress-pack-list" aria-label={`Packs in ${areaNames[selectedArea] || 'this area'}`}>
+          {quizzes.filter(quiz => quiz.category_id === selectedArea).map(quiz => <button
+            key={quiz.id} type="button" aria-current={selectedQuiz === quiz.id ? 'page' : undefined}
+            onClick={() => setSelectedQuiz(quiz.id)}>{quiz.title}</button>)}
+        </nav>
         <section className="bl-trajectory-panel bl-accuracy-panel" aria-label="Accuracy by attempt">
           <div className="bl-panel-heading"><div>
             <p className="bl-kicker">01 · Accuracy</p><h2>{selectedMeta?.title}</h2>
           </div><div className="bl-model-state"><i /><span>{accuracyAttempts.length} completed attempt{accuracyAttempts.length === 1 ? '' : 's'}</span></div></div>
           <AccuracyByAttempt attempts={accuracyAttempts} />
+          {selectedSessions.length > 0 && <p className="bl-chart-note">Adaptive sets sample terms for practice, so their percentages may cover different terms. Term readiness below uses independent answers across completed sets.</p>}
         </section>
+
+        {selectedSessions.length > 0 && (termRecord?.quizId === selectedQuiz
+          ? <AdaptiveTermProgress terms={termRecord.terms} states={termRecord.states}
+            sessions={selectedSessions} trials={selectedTrials} unlocked={selectedUnlock} />
+          : <section className="bl-trajectory-panel"><p>Loading term readiness…</p></section>)}
 
         {latest ? <>
         <section className="bl-trajectory-panel">
           <div className="bl-panel-heading"><div>
-            <p className="bl-kicker">02 · Timed practice</p><h2>{selectedMeta?.title}</h2>
+            <p className="bl-kicker">02 · Options fluency</p><h2>{selectedMeta?.title}</h2>
           </div><div className="bl-model-state"><i />
             <span>{history.length < 2 ? 'Limited history' : 'Observed timings'}</span>
           </div></div>
@@ -417,19 +553,40 @@ export default function ProgressPage() {
             </div>
           </div>}
         </section>
-      </> : <section className="bl-trajectory-panel" aria-label="Timed practice locked">
+      </> : <section className="bl-trajectory-panel" aria-label={selectedUnlock ? 'Timed practice unlocked' : 'Timed practice locked'}>
         <div className="bl-panel-heading"><div>
-          <p className="bl-kicker">02 · Timed practice</p><h2>{selectedMeta?.title}</h2>
+          <p className="bl-kicker">02 · Options fluency</p><h2>{selectedMeta?.title}</h2>
         </div></div>
         <div className="bl-fluency-locked">
-          <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+          {!selectedUnlock && <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
             <rect x="12" y="28" width="40" height="29" rx="3" stroke="currentColor" strokeWidth="4" />
             <path d="M21 28v-9a11 11 0 0 1 22 0v9" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
             <circle cx="32" cy="41" r="3" fill="currentColor" />
-          </svg>
-          <p>Complete two accuracy sets at 100% to unlock fluency practice</p>
+          </svg>}
+          <p>{selectedUnlock ? 'Timed practice is unlocked. Your fluency graph will appear after your first timing.'
+            : selectedSessions.length > 0 ? 'Get each term right without help in two completed sets to unlock timed practice'
+              : 'Complete two accuracy sets at 100% to unlock fluency practice'}</p>
         </div>
       </section>}
+
+        {selectedTypedQuizId && <section className="bl-trajectory-panel" aria-label="Typed fluency">
+          <div className="bl-panel-heading"><div>
+            <p className="bl-kicker">03 · Typed fluency</p><h2>{selectedMeta?.title}</h2>
+          </div><div className="bl-model-state"><i /><span>{typedObserved.length} timed attempt{typedObserved.length === 1 ? '' : 's'}</span></div></div>
+          {typedObserved.length ? <>
+            <FluencyTrajectory observed={typedObserved} filtered={typedFiltered} aim={FLUENCY_AIMS.typed} />
+            <div className="bl-chart-key">
+              <span><i className="bl-key-point" />First timing each day</span>
+              <span><i className="bl-key-point" style={{ opacity: 0.28 }} />Later practice</span>
+              <span><i className="bl-key-observed" />Filtered rate and 80% band</span>
+            </div>
+            <p className="bl-chart-note">Typed timings use the observed-day model separately from options. The rate aim is 6 correct/min.</p>
+            {typedHistory.length < 2 && <div className="bl-early-notice"><strong>Limited history</strong>
+              <span>Complete more first-daily typed timings before interpreting the filtered curve.</span></div>}
+          </> : <div className="bl-fluency-locked"><p>{selectedUnlock || latest
+            ? 'Typed practice is available. The graph will appear after your first typed sprint.'
+            : 'Complete the options accuracy pathway to unlock typed sprints.'}</p></div>}
+        </section>}
 
         <section className="bl-history-panel">
           <div className="bl-panel-heading bl-panel-heading-compact"><div>
@@ -440,12 +597,12 @@ export default function ProgressPage() {
             <tbody>{accuracyAttempts.slice().reverse().slice(0, 10).map((attempt, reverseIndex) => {
               const attemptNumber = accuracyAttempts.length - reverseIndex
               const meetsAim = Number(attempt.accuracy_percentage) >= ACCURACY_AIM &&
-                Number(attempt.fluency_rate) >= fluencyAim && attempt.attempt_purpose !== 'accuracy_probe' && attempt.attempt_purpose !== 'accuracy_practice'
+                Number(attempt.fluency_rate) >= fluencyAim && !attempt.assistance_used && !attempt.hint_used_any && attempt.attempt_purpose !== 'accuracy_probe' && attempt.attempt_purpose !== 'accuracy_practice'
               return <tr key={attempt.id}>
                 <td>A{String(attemptNumber).padStart(2, '0')}</td>
                 <td>{formatDate(attempt.completed_at)}</td>
                 <td>{Number(attempt.accuracy_percentage).toFixed(0)}%</td>
-                <td>{attempt.hint_used_any === null ? 'Unknown' : attempt.hint_used_any ? 'Used' : 'No'}</td>
+                <td>{attempt.hint_used_any === null ? 'Unknown' : attempt.hint_used_any ? attempt.quizzes?.response_mode === 'typed' ? 'Letter prompt' : 'Example' : attempt.fewer_options_used ? 'Fewer options' : 'No'}</td>
                 <td>{attempt.attempt_purpose?.startsWith('accuracy') ? '—' : `${Number(attempt.fluency_rate).toFixed(1)}/min`}</td>
                 <td><span className={meetsAim ? 'is-met' : 'is-building'}>
                   {meetsAim ? 'Timing aim met' : attempt.fewer_options_used ? 'Fewer options' : attempt.assistance_used ? 'Supported' : 'Practice'}
@@ -455,9 +612,11 @@ export default function ProgressPage() {
           </table></div>
         </section>
 
+        {selectedQuiz && <ContextPracticeRecord quizId={selectedQuiz} />}
+
         <section className="bl-trajectory-panel" aria-label="Cumulative learning record">
           <div className="bl-panel-heading"><div>
-            <p className="bl-kicker">03 · Cumulative record</p><h2>Practice adds up.</h2>
+            <p className="bl-kicker">04 · Cumulative record</p><h2>Practice adds up.</h2>
           </div></div>
           <CumulativeRecord points={cumulative} />
         </section>

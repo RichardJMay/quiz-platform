@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase, supabasePublic } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import AuthModal from '@/components/auth/AuthModal'
@@ -19,6 +20,7 @@ interface Category {
 interface ContinueQuiz {
   id: string
   title: string
+  context?: boolean
 }
 
 export default function LandingPage() {
@@ -47,29 +49,49 @@ export default function LandingPage() {
     setContinueLoading(true)
     const loadContinueQuiz = async () => {
       try {
-        const { data: attempts, error: attemptsError } = await supabase
-          .from('quiz_attempts')
-          .select('quiz_id')
-          .eq('user_id', user.id)
-          .order('completed_at', { ascending: false })
-          .limit(10)
-
+        const [attemptResult, sessionResult, trialResult, contextResult] = await Promise.all([
+          supabase.from('quiz_attempts').select('quiz_id, completed_at')
+            .eq('user_id', user.id).order('completed_at', { ascending: false }).limit(10),
+          supabase.from('adaptive_sessions').select('id, quiz_id, started_at, completed_at')
+            .eq('user_id', user.id).order('started_at', { ascending: false }).limit(10),
+          supabase.from('adaptive_trials').select('session_id, answered_at')
+            .eq('user_id', user.id).order('answered_at', { ascending: false }).limit(10),
+          supabase.from('context_practice_attempts').select('quiz_id, completed_at')
+            .eq('user_id', user.id).order('completed_at', { ascending: false }).limit(10),
+        ])
+        const { data: attempts, error: attemptsError } = attemptResult
+        const { data: sessions, error: sessionsError } = sessionResult
+        const { data: trials, error: trialsError } = trialResult
         if (attemptsError) throw attemptsError
-        if (!attempts?.length) return
+        if (sessionsError) throw sessionsError
+        if (trialsError) throw trialsError
+        if (contextResult.error) throw contextResult.error
+        const latestAnswer = new Map<string, string>()
+        for (const trial of trials || []) {
+          if (!latestAnswer.has(trial.session_id)) latestAnswer.set(trial.session_id, trial.answered_at)
+        }
+        const candidates = [
+          ...(attempts || []).map(row => ({ quizId: row.quiz_id, at: row.completed_at || '', context: false })),
+          ...(contextResult.data || []).map(row => ({ quizId: row.quiz_id, at: row.completed_at || '', context: true })),
+          ...(sessions || []).map(row => ({ quizId: row.quiz_id, context: false,
+            at: [row.started_at, row.completed_at, latestAnswer.get(row.id)]
+              .filter((value): value is string => Boolean(value)).sort().at(-1)! })),
+        ].filter(row => row.at).sort((a, b) => b.at.localeCompare(a.at))
+        if (!candidates.length) return
 
         const { data: available, error: quizzesError } = await supabasePublic
           .from('quizzes')
           .select('id, title, quiz_mode')
-          .in('id', [...new Set(attempts.map(attempt => attempt.quiz_id))])
+          .in('id', [...new Set(candidates.map(candidate => candidate.quizId))])
           .eq('is_listed', true)
 
         if (quizzesError) throw quizzesError
         const banked = new Map((available ?? [])
           .filter(quiz => quiz.quiz_mode === 'banked')
           .map(quiz => [quiz.id, quiz.title]))
-        const recent = attempts.find(attempt => banked.has(attempt.quiz_id))
+        const recent = candidates.find(candidate => banked.has(candidate.quizId))
         if (!cancelled && recent) {
-          setContinueQuiz({ id: recent.quiz_id, title: banked.get(recent.quiz_id)! })
+          setContinueQuiz({ id: recent.quizId, title: banked.get(recent.quizId)!, context: recent.context })
         }
       } catch (error) {
         console.error('Could not load recent practice:', error)
@@ -175,7 +197,7 @@ export default function LandingPage() {
                     <button
                       className="bl-button bl-button-primary"
                       onClick={() => continueQuiz
-                        ? router.push(`/quiz?id=${encodeURIComponent(continueQuiz.id)}`)
+                        ? router.push(`/quiz?id=${encodeURIComponent(continueQuiz.id)}${continueQuiz.context ? '&stage=context' : ''}`)
                         : document.getElementById('modules')?.scrollIntoView({ behavior: 'smooth' })}
                     >
                       {continueQuiz ? 'Continue practice' : 'Explore modules'}
@@ -258,27 +280,30 @@ export default function LandingPage() {
             <div className="bl-container">
               <div className="bl-section-heading">
                 <div><p className="bl-kicker">What makes it different</p><h2>A learning system, not just a term bank.</h2></div>
-                <p>BehaviorLingo combines measurement, fluency-building and designed contingencies in one practice environment.</p>
+                <p>Build accuracy with support, develop fluency, then practise using the terms in context across all 33 current packs.</p>
               </div>
               <div className="bl-feature-grid">
-                <article className="bl-feature-card">
-                  <span className="bl-feature-code">01 / PERFORMANCE</span>
-                  <h3>See the learning curve.</h3>
-                  <p>Review your quiz accuracy and response rate over time, and see how your practice is changing.</p>
-                  <div className="bl-feature-tags"><span>Graphs</span><span>Progress</span><span>Feedback</span></div>
-                </article>
-                <article className="bl-feature-card">
-                  <span className="bl-feature-code">02 / FLUENCY</span>
-                  <h3>Practise beyond correct.</h3>
-                  <p>Learning continues beyond the first accurate response. Repeated retrieval and overlearning build responding that is faster, more stable and more resistant to forgetting.</p>
-                  <div className="bl-feature-tags"><span>Accuracy</span><span>Rate</span><span>Retention</span></div>
-                </article>
-                <article className="bl-feature-card">
-                  <span className="bl-feature-code">03 / CONTINGENCIES</span>
-                  <h3>Make progress consequential.</h3>
-                  <p>Short practice sessions and clear feedback help you return to the terms that need more work.</p>
-                  <div className="bl-feature-tags"><span>Practice</span><span>Review</span><span>Feedback</span></div>
-                </article>
+                <Link className="bl-feature-card bl-feature-link" href="/how-it-works#accuracy">
+                  <span className="bl-feature-code">01 / ACCURACY FIRST</span>
+                  <h3>Learn what needs work.</h3>
+                  <p>Start with a check of every term. Adaptive practice focuses on the terms that need attention, with familiar items mixed in for review.</p>
+                  <div className="bl-feature-tags"><span>Baseline</span><span>Targeted practice</span></div>
+                  <span className="bl-feature-more">How accuracy practice works <ArrowRight size={16} aria-hidden="true" /></span>
+                </Link>
+                <Link className="bl-feature-card bl-feature-link" href="/how-it-works#support">
+                  <span className="bl-feature-code">02 / SUPPORT TO INDEPENDENCE</span>
+                  <h3>Help when you need it.</h3>
+                  <p>Use fewer options or study an example alongside the definition. Later answers without help show which terms you can identify independently.</p>
+                  <div className="bl-feature-tags"><span>Study examples</span><span>Independent checks</span></div>
+                  <span className="bl-feature-more">How support and readiness work <ArrowRight size={16} aria-hidden="true" /></span>
+                </Link>
+                <Link className="bl-feature-card bl-feature-link" href="/how-it-works#fluency">
+                  <span className="bl-feature-code">03 / FLUENCY AND PROGRESS</span>
+                  <h3>Build speed. See progress.</h3>
+                  <p>Once accuracy is established, practise in short timed sessions. Track accuracy and response rate separately for options and typed answers.</p>
+                  <div className="bl-feature-tags"><span>Timed practice</span><span>Learning records</span></div>
+                  <span className="bl-feature-more">How fluency is tracked <ArrowRight size={16} aria-hidden="true" /></span>
+                </Link>
               </div>
             </div>
         </section>
@@ -299,7 +324,7 @@ export default function LandingPage() {
         <div className="bl-container bl-footer-inner">
           <div><div className="bl-footer-wordmark">behavior<span>lingo</span></div><p>Fluency training for behaviour analysis.</p></div>
           <div className="bl-footer-links">
-            <button onClick={() => router.push('/privacy')}>Privacy</button><button onClick={() => router.push('/terms')}>Terms</button>
+            <Link href="/how-it-works">How it works</Link><button onClick={() => router.push('/privacy')}>Privacy</button><button onClick={() => router.push('/terms')}>Terms</button>
             <a href="https://richardjmay.github.io/" target="_blank" rel="noopener noreferrer">Dr May</a>
           </div>
           <span className="bl-copyright">© 2026 BehaviorLingo</span>

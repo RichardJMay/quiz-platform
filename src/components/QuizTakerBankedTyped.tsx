@@ -5,8 +5,8 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { getPackGuide } from '@/lib/quiz-pathway'
-import { loadPathwayAttempts, nextAttemptContext, type AttemptContext } from '@/lib/pathway-client'
-import { accuracyGate, firstLetterPrompt, type PathwayAttempt } from '@/lib/learning-stage'
+import { loadPathwayAttempts, nextAttemptContext, learnerLocalDate, type AttemptContext } from '@/lib/pathway-client'
+import { accuracyGate, firstLetterPrompt, fluencyPurposeForDay, type PathwayAttempt } from '@/lib/learning-stage'
 
 interface Quiz {
   id: string
@@ -44,6 +44,19 @@ const IDLE_WARNING_MS = 4.5 * 60 * 1000
 const normalize = (s: string) =>
   s.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[“”‘’]/g, '"')
 
+async function adaptiveReceptiveAccess(userId: string, typedQuizId: string) {
+  const { data: link, error: linkError } = await supabase.from('adaptive_pack_links')
+    .select('options_quiz_id').eq('typed_quiz_id', typedQuizId).maybeSingle()
+  if (linkError) throw linkError
+  if (!link) return { optionsQuizId: null, unlocked: false, recognisedEarlierTimings: false }
+  const history = await loadPathwayAttempts(userId, link.options_quiz_id)
+  return {
+    optionsQuizId: link.options_quiz_id as string,
+    unlocked: history.adaptiveFluencyUnlocked || history.recognisedEarlierTimings || accuracyGate(history.attempts).met,
+    recognisedEarlierTimings: history.recognisedEarlierTimings,
+  }
+}
+
 export default function QuizTakerBankedTyped() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -70,6 +83,7 @@ export default function QuizTakerBankedTyped() {
   const [assistanceUsed, setAssistanceUsed] = useState(false)
   const [attemptContext, setAttemptContext] = useState<AttemptContext | null>(null)
   const [readyStage, setReadyStage] = useState<'accuracy' | 'fluency'>('accuracy')
+  const [receptiveQuizId, setReceptiveQuizId] = useState<string | null>(null)
   const [recognisedEarlierTimings, setRecognisedEarlierTimings] = useState(false)
   const [priorPathwayAttempts, setPriorPathwayAttempts] = useState<PathwayAttempt[]>([])
   const [accuracyUnlocked, setAccuracyUnlocked] = useState(false)
@@ -128,8 +142,11 @@ export default function QuizTakerBankedTyped() {
       })
       if (!user) throw new Error('Sign in is required to load your learning pathway')
       const history = await loadPathwayAttempts(user.id, id)
-      setReadyStage(history.recognisedEarlierTimings || accuracyGate(history.attempts).met ? 'fluency' : 'accuracy')
-      setRecognisedEarlierTimings(history.recognisedEarlierTimings)
+      const receptive = await adaptiveReceptiveAccess(user.id, id)
+      setReceptiveQuizId(receptive?.optionsQuizId ?? null)
+      const unlocked = receptive.unlocked
+      setReadyStage(unlocked ? 'fluency' : 'accuracy')
+      setRecognisedEarlierTimings(receptive?.recognisedEarlierTimings ?? history.recognisedEarlierTimings)
     } catch (e) {
       console.error(e)
       setSelectedQuiz(null)
@@ -152,20 +169,30 @@ export default function QuizTakerBankedTyped() {
 
     try {
       const previousAttempts = await loadPathwayAttempts(user.id, quiz.id)
+      const receptive = await adaptiveReceptiveAccess(user.id, quiz.id)
+      setReceptiveQuizId(receptive.optionsQuizId)
+      if (!receptive.unlocked) {
+        setSelectedQuiz(quiz)
+        setQuestions([])
+        setReadyStage('accuracy')
+        return
+      }
       const context = nextAttemptContext(previousAttempts, user.id, quiz.id)
+      context.stage = 'fluency'
+      context.purpose = fluencyPurposeForDay(previousAttempts.attempts, learnerLocalDate())
       setReadyStage(context.stage)
-      setRecognisedEarlierTimings(context.recognisedEarlierTimings)
+      setRecognisedEarlierTimings(receptive?.recognisedEarlierTimings ?? context.recognisedEarlierTimings)
       setPriorPathwayAttempts(previousAttempts.attempts)
       setAccuracyUnlocked(false)
       const [{ data: termData, error: tErr }, { data: qData, error: qErr }] = await Promise.all([
         supabase
-          .from('quiz_term_bank')
+          .from('active_quiz_terms')
           .select('id, term_text')
           .eq('quiz_id', quiz.id)
           .order('created_at', { ascending: true }),
         supabase
-          .from('questions')
-          .select('id, question_text, explanation, hint, correct_term_id')
+          .from('active_definition_questions')
+          .select('id, question_text, explanation, hint, correct_term_id').eq('definition_variant', 0)
           .eq('quiz_id', quiz.id)
           .order('created_at', { ascending: true }),
       ])
@@ -362,7 +389,9 @@ export default function QuizTakerBankedTyped() {
       fluency_rate: fluencyRate,
       total_time_minutes: totalTimeMinutes,
       remaining_term_ids: remainingTerms.map(t => t.id),
-      attempt_purpose: attemptContext.stage === 'accuracy' && assistanceUsed ? 'accuracy_practice' : attemptContext.purpose,
+      attempt_purpose: assistanceUsed
+        ? attemptContext.stage === 'accuracy' ? 'accuracy_practice' : 'fluency_practice'
+        : attemptContext.purpose,
       session_id: attemptContext.sessionId,
       learner_local_date: attemptContext.learnerLocalDate,
       response_mode: 'typed',
@@ -452,6 +481,9 @@ export default function QuizTakerBankedTyped() {
                     ? 'Every answer right! Do this again in a separate session to unlock timed practice.'
                     : 'Keep working toward every answer right. You can use a prompt when you need one.'}
             </p>}
+            {result.saved && attemptContext?.stage === 'fluency' && assistanceUsed && <p className="bl-complete-lede">
+              Letter prompt used. This run is recorded as supported practice. Try without a prompt when you are ready.
+            </p>}
             {result.saved && itemSaveFailed && <p className="bl-complete-lede" role="alert">
               The attempt was saved, but one or more item responses could not be recorded.
             </p>}
@@ -499,7 +531,7 @@ export default function QuizTakerBankedTyped() {
         <main className="bl-session-shell bl-start-wrap">
           <section className="bl-start-panel">
             <div className="bl-start-copy">
-              <p className="bl-kicker">{readyStage === 'accuracy' ? 'Step 1 of 2 · Get the terms right' : 'Step 2 of 2 · Build speed'}</p>
+              <p className="bl-kicker">Fluency · Typed retrieval</p>
               <h1>{selectedQuiz.title}</h1>
               <p>{guide?.theme || selectedQuiz.description}</p>
               {guide && <p className="bl-tasklist-codes">Task-list areas: {guide.codes}</p>}
@@ -507,15 +539,23 @@ export default function QuizTakerBankedTyped() {
               {readyStage === 'fluency' && recognisedEarlierTimings && <p>Earlier perfect timings count toward your progress. You can start timed practice.</p>}
             </div>
             <div className="bl-start-console">
+              {readyStage === 'accuracy' ? <>
+                <span>Typed timing is locked</span>
+                <p>{receptiveQuizId ? 'Learn the terms in the options pack first. When every term is ready, typed timing opens too.'
+                  : 'This typed pack is not linked to an options pack yet.'}</p>
+                {receptiveQuizId && <button onClick={() => router.push(`/quiz?id=${receptiveQuizId}`)} className="bl-button bl-start-button">
+                  Continue options practice <span>→</span>
+                </button>}
+              </> : <>
               <span>How this pack works</span>
               <ol>
                 <li><b>01</b><p>Read the definition and type the matching term.</p></li>
                 <li><b>02</b><p>Type the term as listed in the pack. Letter case and extra spaces do not matter.</p></li>
-                <li><b>03</b><p>{readyStage === 'accuracy'
-                  ? 'Get every answer right without prompts in two separate sessions. Then timed practice unlocks.'
-                  : `Work accurately and build toward ${threshold} correct responses per minute.`}</p></li>
+                <li><b>03</b><p>Use the letter prompt when you need help. Prompted runs are recorded as supported practice.</p></li>
+                <li><b>04</b><p>Work accurately and build toward {threshold} correct responses per minute.</p></li>
               </ol>
-              <button onClick={() => startQuiz(selectedQuiz)} className="bl-button bl-start-button">{readyStage === 'accuracy' ? 'Practise the terms' : 'Start timing'} <span>→</span></button>
+              <button onClick={() => startQuiz(selectedQuiz)} className="bl-button bl-start-button">Start timing <span>→</span></button>
+              </>}
             </div>
           </section>
         </main>
@@ -579,12 +619,12 @@ export default function QuizTakerBankedTyped() {
                 />
               </div>
 
-              {attemptContext?.stage === 'accuracy' && !showFeedback && correctTerm && <div className="bl-help-tools">
+              {!showFeedback && correctTerm && <div className="bl-help-tools">
                 <button type="button" className="bl-hint-toggle" aria-expanded={hintShown}
                   onClick={() => {
                     if (!hintShown) { setHintUsedForItem(true); setHintUsedInAttempt(true); setAssistanceUsed(true) }
                     setHintShown(v => !v)
-                  }}>{hintShown ? 'Hide prompt' : 'Show a prompt'}</button>
+                  }}>{hintShown ? 'Hide letter prompt' : 'Show letter prompt'}</button>
                 {hintShown && <div className="bl-letter-prompt" role="status" aria-label="First letters and number of letters">
                   {firstLetterPrompt(correctTerm.term_text)}
                 </div>}

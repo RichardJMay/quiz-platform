@@ -16,7 +16,7 @@ const packs: PackGuide[] = [
   { title: 'Principles: Motivating Operations', theme: 'Establishing and abolishing operations and conditioned motivating operations.', codes: 'B.16' },
   { title: 'Principles: Respondent Conditioning', theme: 'Reflexes, conditioned stimuli, respondent extinction and related effects.', codes: 'B.3, B.11' },
   { title: 'Principles: Stimulus Control', theme: 'Discrimination, generalization, stimulus classes and conditional relations.', codes: 'B.1, B.2, B.12, B.13, B.14, B.24, G.11' },
-  { title: 'Principles: Verbal Behavior', theme: 'Verbal operants, listener behavior and rule-governed behavior.', codes: 'A.3, B.18, B.19' },
+  { title: 'Principles: Verbal Behavior', theme: 'Verbal operants, autoclitics, multiple control, listener behavior and rules.', codes: 'A.3, B.18, B.19, B.20' },
   { title: 'Principles: Derived Stimulus Relations', theme: 'Equivalence, derived relations and relational responding.', codes: 'B.21' },
 
   { title: 'Measurement C1-C4', theme: 'Operational definitions and direct measures of behavior.', codes: 'B.1, C.1, C.2, C.3, C.4, C.7, C.10' },

@@ -83,13 +83,13 @@ export function CumulativeRecord({ points }: { points: CumulativePoint[] }) {
   const max = Math.max(1, points[points.length - 1].completed)
   const y = (value: number) => M.top + plotH * (1 - value / max)
   const series = [
-    { key: 'completed' as const, color: '#152219', label: 'Completed quizzes' },
+    { key: 'completed' as const, color: '#152219', label: 'Completed sets' },
     { key: 'accuracyMastered' as const, color: '#b4683a', label: 'Packs accurate' },
     { key: 'fluencyMastered' as const, color: '#2f6f4e', label: 'Packs fluent' },
   ]
   return <>
     <div className="bl-trajectory-scroll"><svg viewBox={`0 0 ${W} ${H}`} className="bl-trajectory-chart"
-      role="img" aria-label="Cumulative completed quizzes and unique packs meeting accuracy and fluency aims by day">
+      role="img" aria-label="Cumulative completed sets and unique packs meeting accuracy and fluency aims by day">
       <rect x={M.left} y={M.top} width={plotW} height={plotH} fill="#f4f1df" stroke="#152219" />
       {[0, .25, .5, .75, 1].map(fraction => <g key={fraction}>
         <line x1={M.left} y1={y(max * fraction)} x2={W - M.right} y2={y(max * fraction)} stroke="#9aaa83" strokeWidth="0.7" />
@@ -98,7 +98,7 @@ export function CumulativeRecord({ points }: { points: CumulativePoint[] }) {
       {series.map(s => <g key={s.key}>
         <polyline points={points.map(point => `${x(point.day)},${y(point[s.key])}`).join(' ')} fill="none" stroke={s.color} strokeWidth="3" />
         {points.map(point => <circle key={point.day} cx={x(point.day)} cy={y(point[s.key])} r="4" fill={s.color}>
-          <title>{`${dateLabel(point.day)} · ${s.label}: ${point[s.key]} · Quizzes completed that day: ${point.dailyCompleted}`}</title>
+          <title>{`${dateLabel(point.day)} · ${s.label}: ${point[s.key]} · Sets completed that day: ${point.dailyCompleted}`}</title>
         </circle>)}
       </g>)}
       {[points[0], points[Math.floor((points.length - 1) / 2)], points[points.length - 1]].filter((point, index, array) => array.findIndex(p => p.day === point.day) === index).map(point =>
@@ -106,11 +106,11 @@ export function CumulativeRecord({ points }: { points: CumulativePoint[] }) {
       <text x={M.left + plotW / 2} y={H - 7} textAnchor="middle" className="bl-chart-axis">Calendar day</text>
     </svg></div>
     <div className="bl-chart-key">{series.map(s => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}</div>
-    <p className="bl-chart-note">Completed quizzes count each finished attempt. Mastery lines count each pack once.</p>
+    <p className="bl-chart-note">Completed sets count each finished practice or timing. Mastery lines count each pack once.</p>
     <div className="bl-daily-summary">
       <h3>Recent activity by day</h3>
       <div className="bl-history-scroll"><table>
-        <thead><tr><th>Day</th><th>Quizzes completed</th><th>Packs accurate</th><th>Packs fluent</th></tr></thead>
+        <thead><tr><th>Day</th><th>Sets completed</th><th>Packs accurate</th><th>Packs fluent</th></tr></thead>
         <tbody>{points.slice(-7).reverse().map(point => <tr key={point.day}>
           <td>{dateLabel(point.day)}</td><td>{point.dailyCompleted}</td>
           <td>{point.accuracyMastered}</td><td>{point.fluencyMastered}</td>

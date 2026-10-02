@@ -7,6 +7,7 @@ import AuthModal from '@/components/auth/AuthModal'
 import { useAuth } from '@/contexts/AuthContext'
 import { ArrowLeft } from 'lucide-react'
 import { getPackGuide, pathwayOrder } from '@/lib/quiz-pathway'
+import { unlockedOptionsPacks, type UnlockAttempt } from '@/lib/options-unlock'
 
 type QuizMode = 'mcq' | 'banked'
 type ResponseMode = 'options' | 'typed' | null
@@ -46,10 +47,15 @@ function CategoryPageContent() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
   const [perfByQuiz, setPerfByQuiz] = useState<Record<string, PerfStats>>({})
   const [performanceUserId, setPerformanceUserId] = useState<string | null>(null)
+  const [typedLinks, setTypedLinks] = useState<Record<string, string>>({})
+  const [contextPacks, setContextPacks] = useState<Set<string>>(new Set())
+  const [unlockedOptions, setUnlockedOptions] = useState<Set<string>>(new Set())
+  const [accessLoading, setAccessLoading] = useState(false)
+  const [accessError, setAccessError] = useState(false)
   const [loading, setLoading] = useState(true)
   const [authModalOpen, setAuthModalOpen] = useState(false)
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login')
-  const [mobileMode, setMobileMode] = useState<'options' | 'typed'>('options')
+  const [practiceMode, setPracticeMode] = useState<'options' | 'typed' | 'context'>('options')
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -88,19 +94,42 @@ function CategoryPageContent() {
   }
 
   useEffect(() => {
+    let cancelled = false
     const loadPerformanceData = async () => {
       setPerformanceUserId(null)
       setPerfByQuiz({})
+      setTypedLinks({})
+      setUnlockedOptions(new Set())
+      setContextPacks(new Set())
+      setAccessError(false)
       if (!user || quizzes.length === 0) return
-      const { data, error } = await supabase
-        .from('quiz_attempts')
-        .select('quiz_id, accuracy_percentage, fluency_rate, completed_at')
-        .eq('user_id', user.id)
-
-      if (error || !data) return
+      setAccessLoading(true)
+      try {
+        const records: Array<AttemptRow & UnlockAttempt> = []
+        for (let offset = 0; ; offset += 500) {
+          const { data, error } = await supabase.from('quiz_attempts')
+            .select('quiz_id, accuracy_percentage, fluency_rate, completed_at, completed_day_ldn, attempt_purpose, session_id, completed, independent, assistance_used, terminal_option_condition, correct_answers, total_questions, learner_local_date')
+            .eq('user_id', user.id).order('completed_at', { ascending: true })
+            .range(offset, offset + 499)
+          if (error) throw error
+          records.push(...((data || []) as Array<AttemptRow & UnlockAttempt>))
+          if (!data || data.length < 500) break
+        }
+        const [linkResult, progressResult, contextResult] = await Promise.all([
+          supabase.from('adaptive_pack_links').select('typed_quiz_id, options_quiz_id'),
+          supabase.from('adaptive_pack_progress').select('quiz_id').eq('user_id', user.id),
+          supabase.rpc('context_practice_packs'),
+        ])
+        if (linkResult.error) throw linkResult.error
+        if (progressResult.error) throw progressResult.error
+        if (contextResult.error) throw contextResult.error
+        if (cancelled) return
+        setContextPacks(new Set((contextResult.data || []) as string[]))
+        setTypedLinks(Object.fromEntries((linkResult.data || []).map(row => [row.typed_quiz_id, row.options_quiz_id])))
+        setUnlockedOptions(unlockedOptionsPacks(records, new Set((progressResult.data || []).map(row => row.quiz_id))))
 
       const byQuiz = new Map<string, AttemptRow[]>()
-      data.forEach(row => {
+      records.forEach(row => {
         if (!byQuiz.has(row.quiz_id)) byQuiz.set(row.quiz_id, [])
         byQuiz.get(row.quiz_id)!.push(row)
       })
@@ -119,9 +148,16 @@ function CategoryPageContent() {
       })
       setPerfByQuiz(stats)
       setPerformanceUserId(user.id)
+      } catch (error) {
+        console.error('Could not load practice access:', error)
+        if (!cancelled) setAccessError(true)
+      } finally {
+        if (!cancelled) setAccessLoading(false)
+      }
     }
 
     void loadPerformanceData()
+    return () => { cancelled = true }
   }, [user?.id, quizzes])
 
   const startQuiz = (quizId: string) => {
@@ -131,7 +167,7 @@ function CategoryPageContent() {
     }
     if (navigatingRef.current) return
     navigatingRef.current = true
-    router.push(`/quiz?id=${quizId}`)
+    router.push(`/quiz?id=${quizId}${practiceMode === 'context' ? '&stage=context' : ''}`)
     setTimeout(() => {
       navigatingRef.current = false
     }, 2000)
@@ -158,8 +194,9 @@ function CategoryPageContent() {
   )
 
   const bankedTyped = useMemo(
-    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed').sort(pathwayOrder),
-    [quizzes]
+    () => quizzes.filter(quiz => quiz.quiz_mode === 'banked' && quiz.response_mode === 'typed' &&
+      Boolean(typedLinks[quiz.id]) && unlockedOptions.has(typedLinks[quiz.id])).sort(pathwayOrder),
+    [quizzes, typedLinks, unlockedOptions]
   )
 
   const SmallQuizCard = ({ quiz, position, suggested }: { quiz: Quiz; position: number; suggested: boolean }) => {
@@ -167,21 +204,22 @@ function CategoryPageContent() {
     const performance = perfByQuiz[quiz.id]
     const accuracy = performance?.bestAccuracy ?? null
     const fluency = performance?.bestFluency ?? null
-    const mode = quiz.response_mode === 'typed' ? 'Typed' : 'Options'
+    const mode = practiceMode === 'context' ? 'Context' : quiz.response_mode === 'typed' ? 'Typed' : 'Options'
     const aim = mode === 'Typed' ? 6 : 15
 
     let state: 'learning' | 'accurate' | 'fluent' = 'learning'
     let stateLabel = accuracy === null ? 'Not yet practised' : 'Building'
-    if (accuracy === 100 && (fluency ?? 0) >= aim) {
+    if (mode === 'Context') { state = 'accurate'; stateLabel = 'Unlocked' }
+    else if (accuracy === 100 && (fluency ?? 0) >= aim) {
       state = 'fluent'
       stateLabel = 'Fluent'
+    } else if (mode === 'Options' && unlockedOptions.has(quiz.id)) {
+      state = 'accurate'
+      stateLabel = 'Accuracy ready'
     } else if (accuracy === 100) {
       state = 'accurate'
       stateLabel = 'Accurate'
     }
-
-    const bestAccuracy = accuracy !== null ? `${accuracy}%` : '—'
-    const bestFluency = fluency !== null ? `${fluency.toFixed(1)}/min` : '—'
 
     return (
       <article className={`bl-quiz-card bl-quiz-card-${state}`} aria-label={`Practice set: ${quiz.title}`}>
@@ -198,16 +236,10 @@ function CategoryPageContent() {
         {(guide?.theme || quiz.description) && <p className="bl-quiz-description">{guide?.theme || quiz.description}</p>}
         {guide && <p className="bl-tasklist-codes">Task-list areas: {guide.codes}</p>}
 
-        <dl className="bl-quiz-metrics">
-          <div><dt>Best accuracy</dt><dd>{bestAccuracy}</dd></div>
-          <div><dt>Best rate</dt><dd>{bestFluency}</dd></div>
-          <div><dt>Aim</dt><dd>{aim}/min</dd></div>
-        </dl>
-
         <div className="bl-quiz-card-bottom">
           <span className="bl-access-label">Account access</span>
           <button className="bl-button bl-card-action" onClick={() => startQuiz(quiz.id)}>
-            {performance?.bestAccuracy !== null && performance?.bestAccuracy !== undefined ? 'Practise again' : 'Start practice'}
+            {mode === 'Context' ? 'Practice questions' : mode === 'Typed' ? 'Start sprint' : 'Practise options'}
           </button>
         </div>
       </article>
@@ -221,7 +253,7 @@ function CategoryPageContent() {
     description,
     items,
   }: {
-    mode: 'options' | 'typed'
+    mode: 'options' | 'typed' | 'context'
     code: string
     title: string
     description: string
@@ -243,7 +275,7 @@ function CategoryPageContent() {
     return (
     <section
       id={`practice-${mode}`}
-      className={`bl-practice-column ${mobileMode === mode ? 'bl-mobile-active' : 'bl-mobile-inactive'}`}
+      className={`bl-practice-column ${practiceMode === mode ? 'bl-mobile-active' : 'bl-mobile-inactive'}`}
       aria-labelledby={`tab-${mode}`}
     >
       <div className="bl-practice-column-head">
@@ -255,7 +287,11 @@ function CategoryPageContent() {
         <strong aria-label={`${items.length} practice sets`}>{items.length}</strong>
       </div>
       {items.length === 0 ? (
-        <div className="bl-column-empty">No practice sets available yet.</div>
+        <div className="bl-column-empty">{mode === 'context' ? accessError ? 'Could not check access. Please reload this page.' : accessLoading ? 'Checking practice-question access…' : 'Meet the options fluency aim for a pack to unlock its practice questions.' : mode === 'typed' ? !user ? 'Sign in to see your unlocked typed sprints.'
+          : accessError ? 'Could not check typed access. Please reload this page.'
+          : accessLoading ? 'Checking available typed sprints…'
+            : 'No typed sprints unlocked yet. Complete the options accuracy pathway for a pack first.'
+          : 'No practice sets available yet.'}</div>
       ) : (
         <div className="bl-quiz-list">{items.map((quiz, index) => <SmallQuizCard key={quiz.id} quiz={quiz} position={index + 1} suggested={quiz.id === next?.id} />)}</div>
       )}
@@ -357,24 +393,28 @@ function CategoryPageContent() {
             </div>
           ) : (
             <>
-              <div className="bl-mobile-mode-switch" role="tablist" aria-label="Practice mode">
+              <div className="bl-mobile-mode-switch bl-practice-mode-switch" role="tablist" aria-label="Practice mode">
                 <button
                   id="tab-options"
                   role="tab"
-                  aria-selected={mobileMode === 'options'}
+                  aria-selected={practiceMode === 'options'}
                   aria-controls="practice-options"
-                  onClick={() => setMobileMode('options')}
+                  onClick={() => setPracticeMode('options')}
                 >
                   Options <span>{bankedOptions.length}</span>
                 </button>
                 <button
                   id="tab-typed"
                   role="tab"
-                  aria-selected={mobileMode === 'typed'}
+                  aria-selected={practiceMode === 'typed'}
                   aria-controls="practice-typed"
-                  onClick={() => setMobileMode('typed')}
+                  onClick={() => setPracticeMode('typed')}
                 >
                   Typed <span>{bankedTyped.length}</span>
+                </button>
+                <button id="tab-context" role="tab" aria-selected={practiceMode === 'context'}
+                  aria-controls="practice-context" onClick={() => setPracticeMode('context')}>
+                  Practice questions <span>{bankedOptions.filter(quiz => contextPacks.has(quiz.id)).length}</span>
                 </button>
               </div>
               <div className="bl-practice-columns">
@@ -392,6 +432,9 @@ function CategoryPageContent() {
                   description="Strengthen independent retrieval without response prompts."
                   items={bankedTyped}
                 />
+                <PracticeColumn mode="context" code="MODE_03" title="Practice questions"
+                  description="Use the terms in timed scenarios. Correct terms leave the option bank as you answer."
+                  items={bankedOptions.filter(quiz => contextPacks.has(quiz.id))} />
               </div>
             </>
           )}

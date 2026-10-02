@@ -9,7 +9,11 @@ export type AttemptContext = {
   recognisedEarlierTimings: boolean
 }
 
-export type PathwayHistory = { attempts: PathwayAttempt[]; recognisedEarlierTimings: boolean }
+export type PathwayHistory = {
+  attempts: PathwayAttempt[]
+  recognisedEarlierTimings: boolean
+  adaptiveFluencyUnlocked: boolean
+}
 
 export function learnerLocalDate(now = new Date()): string {
   const year = now.getFullYear()
@@ -38,6 +42,10 @@ export function learningSessionId(userId: string, quizId: string): string {
 }
 
 export async function loadPathwayAttempts(userId: string, quizId: string): Promise<PathwayHistory> {
+  const { data: adaptiveProgress, error: adaptiveError } = await supabase
+    .from('adaptive_pack_progress').select('quiz_id')
+    .eq('user_id', userId).eq('quiz_id', quizId).maybeSingle()
+  if (adaptiveError) throw adaptiveError
   const rows: Array<{
     attempt_purpose: string | null; session_id: string | null; completed: boolean | null;
     independent: boolean | null; assistance_used: boolean | null;
@@ -55,7 +63,8 @@ export async function loadPathwayAttempts(userId: string, quizId: string): Promi
     rows.push(...(data || []))
     if (!data || data.length < 500) break
   }
-  return { recognisedEarlierTimings: recognisesEarlierTimings(rows), attempts: rows.filter(row => row.attempt_purpose !== null).map(row => ({
+  return { adaptiveFluencyUnlocked: Boolean(adaptiveProgress),
+    recognisedEarlierTimings: recognisesEarlierTimings(rows), attempts: rows.filter(row => row.attempt_purpose !== null).map(row => ({
     purpose: row.attempt_purpose as PathwayAttempt['purpose'],
     sessionId: row.session_id ?? '',
     completed: row.completed === true,
@@ -69,7 +78,7 @@ export async function loadPathwayAttempts(userId: string, quizId: string): Promi
 }
 
 export function nextAttemptContext(history: PathwayHistory, userId: string, quizId: string): AttemptContext {
-  const stage = history.recognisedEarlierTimings || accuracyGate(history.attempts).met ? 'fluency' : 'accuracy'
+  const stage = history.adaptiveFluencyUnlocked || history.recognisedEarlierTimings || accuracyGate(history.attempts).met ? 'fluency' : 'accuracy'
   const today = learnerLocalDate()
   return {
     stage,
